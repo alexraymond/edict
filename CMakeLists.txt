@@ -18,4 +18,5 @@ else()
 endif()
 
 # Add all the source projects
+add_subdirectory(experiments)
 add_subdirectory(src)

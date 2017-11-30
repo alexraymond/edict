@@ -1,0 +1,5 @@
+# Visual Studio generated files
+.vs/*
+_build/*
+_install/*
+CMakeSettings.json
