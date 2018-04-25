@@ -17,5 +17,12 @@ else()
     set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_ARCHIVE_OUTPUT_DIRECTORY})
 endif()
 
+# Common properties
+set(CMAKE_INCLUDE_CURRENT_DIR ON)
+
+if(MSVC)
+    add_definitions(-D_WIN32_WINNT=0x600)
+endif()
+
 # Add all the source projects
 add_subdirectory(src)
