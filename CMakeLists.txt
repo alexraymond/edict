@@ -24,5 +24,5 @@ if(MSVC)
     add_definitions(-D_WIN32_WINNT=0x600)
 endif()
 
-# Add all the source projects
-add_subdirectory(src)
+# Add all the example projects
+add_subdirectory(examples)
