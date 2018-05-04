@@ -20,7 +20,9 @@ endif()
 # Common properties
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
-add_definitions(-std=c++11)
+if(CMAKE_COMPILER_IS_GNUCXX)
+    add_definitions(-std=c++11)
+endif()
 
 if(MSVC)
     add_definitions(-D_WIN32_WINNT=0x600)
