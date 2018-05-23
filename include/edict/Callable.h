@@ -129,17 +129,17 @@ public:
         m_d()
     {
     }
-    explicit Callable(FreeReceiver receiver_) :
+    Callable(FreeReceiver receiver_) :
         m_d { std::make_shared<detail::FreeFunctionPointer>(receiver_) }
     {
     }
     template <typename T>
-    explicit Callable(T &object_, BoundReceiver<T> receiver_) :
+    Callable(T &object_, BoundReceiver<T> receiver_) :
         m_d { std::make_shared<detail::BoundFunctionPointer<T>>(object_, receiver_) }
     {
     }
     template <typename T>
-    explicit Callable(T *object_, BoundReceiver<T *> receiver_) :
+    Callable(T *object_, BoundReceiver<T *> receiver_) :
         m_d { std::make_shared<detail::BoundFunctionPointer<T *>>(object_, receiver_) }
     {
     }

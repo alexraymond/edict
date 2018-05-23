@@ -8,18 +8,19 @@ using namespace edict;
 
 #include <iostream>
 #include <memory>
+#include <regex>
 using namespace std;
 
 
 // ================================================================================================
 void helloHandler(const string &message_)
 {
-	cout << message_ << ", Handler!" << endl;
+    cout << message_ << ", Handler!" << endl;
 }
 
 void printer(const string &message_)
 {
-	cout << "printer: " << message_ << endl;
+    cout << "printer: " << message_ << endl;
 }
 
 
@@ -69,18 +70,21 @@ private:
 // ================================================================================================
 int main(int argc, char **argv)
 {
-	edict::Broadcaster broadcaster;
+    edict::Broadcaster broadcaster;
 
-	broadcaster.subscribe("/edict/hello", &helloHandler);
-	broadcaster.subscribe("/edict/hello", &printer);
+    broadcaster.subscribe("/edict/hello", &helloHandler);
+    broadcaster.subscribe("/edict/hello", &printer);
+    broadcaster.subscribe(regex("(\\+|-)?[[:digit:]]+"), &helloHandler);
+    broadcaster.subscribe([](const string &topic_) { return topic_.size() < 6; }, &printer);
 
     DirectPrinter printer { "DotMatrix" };
-    broadcaster.subscribe("/edict/hello", printer, &DirectPrinter::print);
+    broadcaster.subscribe("/edict/hello", { printer, &DirectPrinter::print });
 
     auto pronter = make_unique<IndirectPrinter>("OnkJot");
-    broadcaster.subscribe("/edict/hello", pronter.get(), &IndirectPrinter::print);
+    broadcaster.subscribe("/edict/hello", { pronter.get(), &IndirectPrinter::print });
 
 	broadcaster.publish("/edict/hello", "Hello");
+    broadcaster.publish("1234", "Bye");
 
-	return 0;
+    return 0;
 }
