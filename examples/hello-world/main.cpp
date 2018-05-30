@@ -4,6 +4,7 @@
  */
 
 #include <edict/edict.h>
+#include <edict/Single.h>
 using namespace edict;
 
 #include <iostream>
@@ -70,7 +71,7 @@ private:
 // ================================================================================================
 int main(int argc, char **argv)
 {
-    edict::Broadcaster broadcaster;
+    edict::Broadcaster &broadcaster = Single<Broadcaster>::instance();
 
     broadcaster.subscribe("/edict/hello", &helloHandler);
     broadcaster.subscribe("/edict/hello", &printer);
@@ -83,7 +84,7 @@ int main(int argc, char **argv)
     auto pronter = make_unique<IndirectPrinter>("OnkJot");
     broadcaster.subscribe("/edict/hello", { pronter.get(), &IndirectPrinter::print });
 
-	broadcaster.publish("/edict/hello", "Hello");
+    broadcaster.publish("/edict/hello", "Hello");
     broadcaster.publish("1234", "Bye");
 
     return 0;

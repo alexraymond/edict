@@ -22,9 +22,9 @@ namespace edict
 class Broadcaster final
 {
 public:
-	Broadcaster() :
-		m_subscriptions()
-	{
+    Broadcaster() :
+        m_subscriptions()
+    {
     }
 
     bool publish(const std::string &topic_, const std::string &data_)
