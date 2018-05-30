@@ -78,10 +78,10 @@ int main(int argc, char **argv)
     broadcaster.subscribe([](const string &topic_) { return topic_.size() < 6; }, &printer);
 
     DirectPrinter printer { "DotMatrix" };
-    broadcaster.subscribe("/edict/hello", { printer, &DirectPrinter::print });
+    broadcaster.subscribe("/edict/hello", printer, &DirectPrinter::print);
 
     auto pronter = make_unique<IndirectPrinter>("OnkJot");
-    broadcaster.subscribe("/edict/hello", { pronter.get(), &IndirectPrinter::print });
+    broadcaster.subscribe("/edict/hello", pronter.get(), &IndirectPrinter::print);
 
 	broadcaster.publish("/edict/hello", "Hello");
     broadcaster.publish("1234", "Bye");

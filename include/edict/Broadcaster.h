@@ -76,6 +76,16 @@ public:
         m_subscriptions.insert(subscription);
         return true;
     }
+    template <typename T>
+    bool subscribe(const std::string &topic_, T &object_, Callable::BoundReceiver<T> receiver_)
+    {
+        return subscribe(topic_, Callable { object_, receiver_ });
+    }
+    template <typename T>
+    bool subscribe(const std::string &topic_, T *object_, Callable::BoundReceiver<T *> receiver_)
+    {
+        return subscribe(topic_, Callable { object_, receiver_ });
+    }
 
     bool unsubscribe(const std::string &topic_, Callable receiver_)
     {

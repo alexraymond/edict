@@ -56,14 +56,68 @@ private:
     const Receiver m_receiver;
 };
 
+template <typename T, bool isConst = false>
+struct BoundFunctionTraits
+{
+    using Receiver = void(T::*)(const std::string &);
+};
+template <typename T>
+struct BoundFunctionTraits<T, true>
+{
+    using Receiver = void(T::*)(const std::string &) const;
+};
+
+template <typename T, bool isPointer = false>
+struct BoundObjectTraits
+{
+    using BaseType = typename std::remove_reference<T>::type;
+    using BoundType = typename BaseType &;
+    using Receiver = typename BoundFunctionTraits<typename std::remove_const<BaseType>::type,
+                                                  std::is_const<T>::value>::Receiver;
+
+    static void invoke(BoundType obj_, Receiver receiver_, const std::string &data_)
+    {
+        (obj_.*receiver_)(data_);
+    }
+};
+template <typename T>
+struct BoundObjectTraits<T, true>
+{
+    using BaseType = typename std::remove_pointer<T>::type;
+    using BoundType = typename BaseType * const;
+    using Receiver = typename BoundFunctionTraits<typename std::remove_const<BaseType>::type,
+                                                  std::is_const<T>::value>::Receiver;
+
+    static void invoke(BoundType obj_, Receiver receiver_, const std::string &data_)
+    {
+        (obj_->*receiver_)(data_);
+    }
+};
 
 template <typename T>
+class BoundFunctionPointerTraits
+{
+    using _Traits = BoundObjectTraits<T, std::is_pointer<T>::value>;
+
+public:
+    using BoundType = typename _Traits::BoundType;
+    using Receiver  = typename _Traits::Receiver;
+
+    static void invoke(BoundType obj_, Receiver receiver_, const std::string &data_)
+    {
+        _Traits::invoke(obj_, receiver_, data_);
+    }
+};
+
+
+template <typename T, typename Traits = BoundFunctionPointerTraits<T>>
 class BoundFunctionPointer final : public CallableImpl
 {
 public:
-    using Receiver = void(T::*)(const std::string &);
+    using BoundType = typename Traits::BoundType;
+    using Receiver  = typename Traits::Receiver;
 
-    explicit BoundFunctionPointer(T &object_, Receiver receiver_) :
+    explicit BoundFunctionPointer(BoundType object_, Receiver receiver_) :
         m_object(object_),
         m_receiver(receiver_)
     {
@@ -78,40 +132,11 @@ public:
     }
     void invoke(const std::string &data_) const override
     {
-        (m_object.*m_receiver)(data_);
+        Traits::invoke(m_object, m_receiver, data_);
     }
 
 private:
-    T &m_object;
-    const Receiver m_receiver;
-};
-
-template <typename T>
-class BoundFunctionPointer<T *> final : public CallableImpl
-{
-public:
-    using Receiver = void(T::*)(const std::string &);
-
-    explicit BoundFunctionPointer(T *object_, Receiver receiver_) :
-        m_object(object_),
-        m_receiver(receiver_)
-    {
-    }
-
-    bool isEqual(CallableImpl *other_) const override
-    {
-        if (auto *o = dynamic_cast<BoundFunctionPointer<T *> *>(other_))
-            return m_object == o->m_object && m_receiver == o->m_receiver;
-
-        return false;
-    }
-    void invoke(const std::string &data_) const override
-    {
-        (m_object->*m_receiver)(data_);
-    }
-
-private:
-    T * const m_object;
+    BoundType m_object;
     const Receiver m_receiver;
 };
 
@@ -122,6 +147,8 @@ class Callable final
 {
 public:
     using FreeReceiver = detail::FreeFunctionPointer::Receiver;
+    template <typename T>
+    using BoundType = typename detail::BoundFunctionPointer<T>::BoundType;
     template <typename T>
     using BoundReceiver = typename detail::BoundFunctionPointer<T>::Receiver;
 
@@ -136,11 +163,6 @@ public:
     template <typename T>
     Callable(T &object_, BoundReceiver<T> receiver_) :
         m_d { std::make_shared<detail::BoundFunctionPointer<T>>(object_, receiver_) }
-    {
-    }
-    template <typename T>
-    Callable(T *object_, BoundReceiver<T *> receiver_) :
-        m_d { std::make_shared<detail::BoundFunctionPointer<T *>>(object_, receiver_) }
     {
     }
     Callable(const Callable &other_) :
