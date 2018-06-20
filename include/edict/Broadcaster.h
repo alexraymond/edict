@@ -18,6 +18,30 @@
 
 namespace edict
 {
+namespace detail
+{
+template <typename T> struct FunctionTraits {};
+
+template <typename T>
+struct FunctionTraits<void(T::*)(const std::string &)>
+{
+    static constexpr bool IsConst = false;
+    using ObjectType = typename std::decay<T>::type;
+    using TargetType = ObjectType;
+    using FuncType = void(T::*)(const std::string &);
+};
+
+template <typename T>
+struct FunctionTraits<void(T::*)(const std::string &) const>
+{
+    static constexpr bool IsConst = true;
+    using ObjectType = typename std::decay<T>::type;
+    using TargetType = const ObjectType;
+    using FuncType = void(T::*)(const std::string &) const;
+};
+
+}
+
 
 class Broadcaster final
 {
@@ -76,10 +100,14 @@ public:
         m_subscriptions.insert(subscription);
         return true;
     }
-    template <typename T>
-    bool subscribe(const std::string &topic_, T &object_, Callable::BoundReceiver<T> receiver_)
+    template <typename T, typename F,
+              typename = typename std::enable_if<std::is_same<std::decay<T>::type,
+                                                              detail::FunctionTraits<F>::ObjectType>::value>::type>
+    bool subscribe(const std::string &topic_, T &object_, F receiver_)
     {
-        return subscribe(topic_, Callable { object_, receiver_ });
+        return subscribe(topic_, Callable {
+            static_cast<typename detail::FunctionTraits<F>::TargetType &>(object_),
+            static_cast<typename detail::FunctionTraits<F>::FuncType>(receiver_) });
     }
     template <typename T>
     bool subscribe(const std::string &topic_, T *object_, Callable::BoundReceiver<T *> receiver_)
