@@ -152,17 +152,32 @@ public:
     template <typename T>
     using BoundReceiver = typename detail::BoundFunctionPointer<T>::Receiver;
 
+    template <typename T /*, typename = std::enable_if<std::is_pointer<T>::value>::type*/>
+    static Callable make(T *object_, BoundReceiver<T *> receiver_)
+    {
+        Callable c;
+
+        c.m_d = std::make_shared<detail::BoundFunctionPointer<T *>>(object_, receiver_);
+
+        return c;
+    }
+    template <typename T/*, typename = std::enable_if<!std::is_pointer<T>::value>::type*/>
+    static Callable make(T &object_, BoundReceiver<T> receiver_)
+    {
+        Callable c;
+
+        c.m_d = std::make_shared<detail::BoundFunctionPointer<T>>(object_, receiver_);
+
+        return c;
+    }
+
+
     Callable() :
         m_d()
     {
     }
     Callable(FreeReceiver receiver_) :
         m_d { std::make_shared<detail::FreeFunctionPointer>(receiver_) }
-    {
-    }
-    template <typename T>
-    Callable(T &object_, BoundReceiver<T> receiver_) :
-        m_d { std::make_shared<detail::BoundFunctionPointer<T>>(object_, receiver_) }
     {
     }
     Callable(const Callable &other_) :

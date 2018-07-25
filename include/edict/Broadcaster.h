@@ -20,24 +20,52 @@ namespace edict
 {
 namespace detail
 {
-template <typename T> struct FunctionTraits {};
 
-template <typename T>
-struct FunctionTraits<void(T::*)(const std::string &)>
+template <bool IsObjectConst, bool IsFunctionConst>
+struct ObjectTraits
 {
-    static constexpr bool IsConst = false;
-    using ObjectType = typename std::decay<T>::type;
-    using TargetType = ObjectType;
-    using FuncType = void(T::*)(const std::string &);
+    static constexpr bool OK = true;
+};
+template <>
+struct ObjectTraits<true, false>
+{
+    static constexpr bool OK = false;
 };
 
-template <typename T>
-struct FunctionTraits<void(T::*)(const std::string &) const>
+template <typename T, typename F> struct FunctionTraits {};
+
+
+template <typename T> struct ObjectTraits2 { using Type = T & ; };
+template <typename T> struct ObjectTraits2<T *> {using Type = T * ; };
+
+template <typename T1, typename T2>
+struct FunctionTraits<T1, void(T2::*)(const std::string &)>
+{
+    static constexpr bool IsPointer = std::is_pointer<T1>::value;
+
+
+
+    static constexpr bool IsConst = false;
+
+
+    static constexpr bool OK = ObjectTraits<std::is_const_v<T1>, false>::OK;
+    using ObjectType = typename std::remove_cv<T2>::type; //std::decay<T>::type;
+    //using TargetType = ObjectType;
+    using TargetType = typename ObjectTraits2<T1>::Type;
+    using FuncType = void(T2::*)(const std::string &);
+};
+
+template <typename T1, typename T2>
+struct FunctionTraits<T1, void(T2::*)(const std::string &) const>
 {
     static constexpr bool IsConst = true;
-    using ObjectType = typename std::decay<T>::type;
-    using TargetType = const ObjectType;
-    using FuncType = void(T::*)(const std::string &) const;
+
+    static constexpr bool OK = ObjectTraits<std::is_const_v<T1>, true>::OK;
+
+    using ObjectType = typename std::remove_cv<T2>::type;// std::decay<T>::type;
+    using TargetType = typename std::add_const<typename ObjectTraits2<T1>::Type>::type;
+//    using TargetType = const typename ObjectTraits2<T1>::Type;
+    using FuncType = void(T2::*)(const std::string &) const;
 };
 
 }
@@ -101,19 +129,57 @@ public:
         return true;
     }
     template <typename T, typename F,
-              typename = typename std::enable_if<std::is_same<std::decay<T>::type,
-                                                              detail::FunctionTraits<F>::ObjectType>::value>::type>
+              typename = typename std::enable_if<detail::FunctionTraits<T, F>::OK>::type>
+            //          typename = typename std::enable_if<ObjectTraits<std::is_const_v<T>, std::is_const_v<F>>::OK>::type>
     bool subscribe(const std::string &topic_, T &object_, F receiver_)
     {
-        return subscribe(topic_, Callable {
-            static_cast<typename detail::FunctionTraits<F>::TargetType &>(object_),
-            static_cast<typename detail::FunctionTraits<F>::FuncType>(receiver_) });
+        //static_assert(detail::FunctionTraits<T, F>::OK, "LOL");
+        using TargetType = detail::FunctionTraits<T, F>::TargetType;
+        using FuncType = detail::FunctionTraits<T, F>::FuncType;
+
+        return subscribe(topic_, Callable::make<TargetType>(
+            const_cast<TargetType>(object_), receiver_));
+            //static_cast<FuncType>(receiver_)));
     }
-    template <typename T>
-    bool subscribe(const std::string &topic_, T *object_, Callable::BoundReceiver<T *> receiver_)
+    template <typename T, typename F,
+        typename = typename std::enable_if<detail::FunctionTraits<T *, F>::OK>::type>
+        //          typename = typename std::enable_if<ObjectTraits<std::is_const_v<T>, std::is_const_v<F>>::OK>::type>
+        bool subscribe(const std::string &topic_, T *object_, F receiver_)
     {
-        return subscribe(topic_, Callable { object_, receiver_ });
+        //static_assert(detail::FunctionTraits<T, F>::OK, "LOL");
+        using TargetType = detail::FunctionTraits<T *, F>::TargetType;
+        using FuncType = detail::FunctionTraits<T *, F>::FuncType;
+
+        return subscribe(topic_, Callable::make<TargetType>(
+            const_cast<TargetType>(object_), receiver_));
+            //static_cast<FuncType>(receiver_)));
     }
+
+
+/*    template <typename T, typename F,
+              typename = typename std::enable_if<std::is_same<std::remove_cv<T>::type,
+                                                              detail::FunctionTraits<T, F>::ObjectType>::value>::type>
+    bool subscribe(const std::string &topic_, T &object_, F receiver_)
+    {
+        using TargetType = detail::FunctionTraits<T, F>::TargetType;
+        using FuncType   = detail::FunctionTraits<T, F>::FuncType;
+
+        return subscribe(topic_, Callable::make<TargetType &> (
+            static_cast<TargetType &>(object_),
+            static_cast<FuncType>(receiver_) ));
+    }
+    template <typename T, typename F,
+        typename = typename std::enable_if<std::is_same<std::remove_cv<T>::type,
+                                                        detail::FunctionTraits<T, F>::ObjectType>::value>::type>
+    bool subscribe(const std::string &topic_, T *object_, F receiver_)
+    {
+        using TargetType = detail::FunctionTraits<T, F>::TargetType;
+        using FuncType = detail::FunctionTraits<T, F>::FuncType;
+
+        return subscribe(topic_, Callable::make<TargetType> (
+            static_cast<TargetType>(object_),
+            static_cast<FuncType>(receiver_) ));
+    }*/
 
     bool unsubscribe(const std::string &topic_, Callable receiver_)
     {

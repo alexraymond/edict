@@ -32,6 +32,7 @@ public:
         m_name(name_)
     {
     }
+    DirectPrinter(const DirectPrinter &) = delete;
 
     void print(const string &message_) const
     {
@@ -81,7 +82,7 @@ int main(int argc, char **argv)
     broadcaster.subscribe("/edict/hello", printer, &DirectPrinter::print);
 
     auto pronter = make_unique<IndirectPrinter>("OnkJot");
-    //broadcaster.subscribe("/edict/hello", pronter.get(), &IndirectPrinter::print);
+    broadcaster.subscribe("/edict/hello", pronter.get(), &IndirectPrinter::print);
 
 	broadcaster.publish("/edict/hello", "Hello");
     broadcaster.publish("1234", "Bye");
