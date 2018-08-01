@@ -18,58 +18,6 @@
 
 namespace edict
 {
-namespace detail
-{
-
-template <bool IsObjectConst, bool IsFunctionConst>
-struct ObjectTraits
-{
-    static constexpr bool OK = true;
-};
-template <>
-struct ObjectTraits<true, false>
-{
-    static constexpr bool OK = false;
-};
-
-template <typename T, typename F> struct FunctionTraits {};
-
-
-template <typename T> struct ObjectTraits2 { using Type = T & ; };
-template <typename T> struct ObjectTraits2<T *> {using Type = T * ; };
-
-template <typename T1, typename T2>
-struct FunctionTraits<T1, void(T2::*)(const std::string &)>
-{
-    static constexpr bool IsPointer = std::is_pointer<T1>::value;
-
-
-
-    static constexpr bool IsConst = false;
-
-
-    static constexpr bool OK = ObjectTraits<std::is_const<T1>::value, false>::OK;
-    using ObjectType = typename std::remove_cv<T2>::type; //std::decay<T>::type;
-    //using TargetType = ObjectType;
-    using TargetType = typename ObjectTraits2<T1>::Type;
-    using FuncType = void(T2::*)(const std::string &);
-};
-
-template <typename T1, typename T2>
-struct FunctionTraits<T1, void(T2::*)(const std::string &) const>
-{
-    static constexpr bool IsConst = true;
-
-    static constexpr bool OK = ObjectTraits<std::is_const<T1>::value, true>::OK;
-
-    using ObjectType = typename std::remove_cv<T2>::type;// std::decay<T>::type;
-    using TargetType = typename std::add_const<typename ObjectTraits2<T1>::Type>::type;
-//    using TargetType = const typename ObjectTraits2<T1>::Type;
-    using FuncType = void(T2::*)(const std::string &) const;
-};
-
-}
-
 
 class Broadcaster final
 {
@@ -128,6 +76,7 @@ public:
         m_subscriptions.insert(subscription);
         return true;
     }
+
     template <
         typename T,
         typename F,

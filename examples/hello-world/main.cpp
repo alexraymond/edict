@@ -34,7 +34,7 @@ public:
     }
     DirectPrinter(const DirectPrinter &) = delete;
 
-    void print(const string &message_)
+    void print(const string &message_) const
     {
         cout << "DirectPrinter(\"" << m_name << "\"): " << message_ << endl;
     }
@@ -58,7 +58,7 @@ public:
     {
     }
 
-    void print(const string &message_)
+    void print(const string &message_) const
     {
         cout << "IndirectPrinter(\"" << m_name << "\"): " << message_ << endl;
     }

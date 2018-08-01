@@ -72,28 +72,35 @@ struct MaybePointer<T, true>
 
 // "Extreme" variant of decay to remove *all* qualifiers from a type =========================
 template <typename T>
-using Decompose = typename std::remove_cv<typename std::remove_pointer<T>::type>::type;
+struct Decompose
+{
+    using Type = typename std::remove_cv<typename std::remove_pointer<T>::type>::type;
+};
+
+// "Extreme" variant of is_const to ignore pointer/reference types ===========================
+template <typename T>
+struct IsConstType
+{
+    static constexpr bool Value =
+        std::is_const<typename std::remove_pointer<typename std::remove_reference<T>::type>::type>::value;
+};
 
 // Traits for invoking bound functions =======================================================
-template <typename T, typename... Args> struct BoundFunctionInvokeTraits {};
+template <typename T, typename F, typename... Args> struct BoundFunctionInvokeTraits {};
 
-template <typename T, typename... Args>
-struct BoundFunctionInvokeTraits<T &, Args...>
+template <typename T, typename F, typename... Args>
+struct BoundFunctionInvokeTraits<T &, F, Args...>
 {
-    using _T = typename Decompose<T>;
-
-    static void invoke(T &object_, void(_T::*func_)(Args...), Args &&...args_)
+    static void invoke(T &object_, F func_, Args &&...args_)
     {
         (object_.*func_)(std::forward<Args>(args_)...);
     }
 };
 
-template <typename T, typename... Args>
-struct BoundFunctionInvokeTraits<T *, Args...>
+template <typename T, typename F, typename... Args>
+struct BoundFunctionInvokeTraits<T *, F, Args...>
 {
-    using _T = typename Decompose<T>;
-
-    static void invoke(T *object_, void(_T::*func_)(Args...), Args &&...args_)
+    static void invoke(T *object_, F func_, Args &&...args_)
     {
         (object_->*func_)(std::forward<Args>(args_)...);
     }
@@ -107,7 +114,7 @@ struct BoundFunctionTraitsBase {};
 template <bool IsObjectConst, bool IsPointer, typename T, typename... Args>
 struct BoundFunctionTraitsBase<true, IsObjectConst, true, IsPointer, T, Args...>
 {
-    using ObjectType = const typename MaybePointer<T, IsPointer>::Type;
+    using ObjectType = typename MaybePointer<const T, IsPointer>::Type;
     using FuncType   = void (T::*)(Args...) const;
 };
 
@@ -124,16 +131,16 @@ template <typename T1, typename T2, typename ...Args>
 struct BoundFunctionTraits<T1, void(T2::*)(Args...)>
 {
     using _BaseTraits = BoundFunctionTraitsBase<
-        std::is_same<typename Decompose<T1>, typename Decompose<T2>>::value,
-        std::is_const<T1>::value, false, std::is_pointer<T1>::value,
-        typename Decompose<T1>, Args...>;
+        std::is_same<typename Decompose<T1>::Type, typename Decompose<T2>::Type>::value,
+        IsConstType<T1>::Value, false, std::is_pointer<T1>::value,
+        typename Decompose<T1>::Type, Args...>;
 
     using ObjectType = typename _BaseTraits::ObjectType;
     using FuncType   = typename _BaseTraits::FuncType;
 
     static void invoke(ObjectType object_, FuncType func_, Args &&... args_)
     {
-        BoundFunctionInvokeTraits<ObjectType, Args...>::invoke(
+        BoundFunctionInvokeTraits<ObjectType, FuncType, Args...>::invoke(
             object_, func_, std::forward<Args>(args_)...);
     }
 };
@@ -142,16 +149,16 @@ template <typename T1, typename T2, typename ...Args>
 struct BoundFunctionTraits<T1, void(T2::*)(Args...) const>
 {
     using _BaseTraits = BoundFunctionTraitsBase<
-        std::is_same<typename Decompose<T1>, typename Decompose<T2>>::value,
-        std::is_const<T1>::value, true, std::is_pointer<T1>::value,
-        typename Decompose<T1>, Args...>;
+        std::is_same<typename Decompose<T1>::Type, typename Decompose<T2>::Type>::value,
+        IsConstType<T1>::Value, true, std::is_pointer<T1>::value,
+        typename Decompose<T1>::Type, Args...>;
 
     using ObjectType = typename _BaseTraits::ObjectType;
     using FuncType = typename _BaseTraits::FuncType;
 
     static void invoke(ObjectType object_, FuncType func_, Args &&... args_)
     {
-        BoundFunctionInvokeTraits<ObjectType, Args...>::invoke(
+        BoundFunctionInvokeTraits<ObjectType, FuncType, Args...>::invoke(
             object_, func_, std::forward<Args>(args_)...);
     }
 };
