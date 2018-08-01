@@ -48,7 +48,7 @@ struct FunctionTraits<T1, void(T2::*)(const std::string &)>
     static constexpr bool IsConst = false;
 
 
-    static constexpr bool OK = ObjectTraits<std::is_const_v<T1>, false>::OK;
+    static constexpr bool OK = ObjectTraits<std::is_const<T1>::value, false>::OK;
     using ObjectType = typename std::remove_cv<T2>::type; //std::decay<T>::type;
     //using TargetType = ObjectType;
     using TargetType = typename ObjectTraits2<T1>::Type;
@@ -60,7 +60,7 @@ struct FunctionTraits<T1, void(T2::*)(const std::string &) const>
 {
     static constexpr bool IsConst = true;
 
-    static constexpr bool OK = ObjectTraits<std::is_const_v<T1>, true>::OK;
+    static constexpr bool OK = ObjectTraits<std::is_const<T1>::value, true>::OK;
 
     using ObjectType = typename std::remove_cv<T2>::type;// std::decay<T>::type;
     using TargetType = typename std::add_const<typename ObjectTraits2<T1>::Type>::type;
@@ -128,58 +128,24 @@ public:
         m_subscriptions.insert(subscription);
         return true;
     }
-    template <typename T, typename F,
-              typename = typename std::enable_if<detail::FunctionTraits<T, F>::OK>::type>
-            //          typename = typename std::enable_if<ObjectTraits<std::is_const_v<T>, std::is_const_v<F>>::OK>::type>
+    template <
+        typename T,
+        typename F,
+        typename Traits = detail::BoundFunctionTraits<T, F>,
+        typename = typename Traits::FuncType>
     bool subscribe(const std::string &topic_, T &object_, F receiver_)
     {
-        //static_assert(detail::FunctionTraits<T, F>::OK, "LOL");
-        using TargetType = detail::FunctionTraits<T, F>::TargetType;
-        using FuncType = detail::FunctionTraits<T, F>::FuncType;
-
-        return subscribe(topic_, Callable::make<TargetType>(
-            const_cast<TargetType>(object_), receiver_));
-            //static_cast<FuncType>(receiver_)));
+        return subscribe(topic_, Callable::make<Traits>(object_, receiver_));
     }
-    template <typename T, typename F,
-        typename = typename std::enable_if<detail::FunctionTraits<T *, F>::OK>::type>
-        //          typename = typename std::enable_if<ObjectTraits<std::is_const_v<T>, std::is_const_v<F>>::OK>::type>
-        bool subscribe(const std::string &topic_, T *object_, F receiver_)
-    {
-        //static_assert(detail::FunctionTraits<T, F>::OK, "LOL");
-        using TargetType = detail::FunctionTraits<T *, F>::TargetType;
-        using FuncType = detail::FunctionTraits<T *, F>::FuncType;
-
-        return subscribe(topic_, Callable::make<TargetType>(
-            const_cast<TargetType>(object_), receiver_));
-            //static_cast<FuncType>(receiver_)));
-    }
-
-
-/*    template <typename T, typename F,
-              typename = typename std::enable_if<std::is_same<std::remove_cv<T>::type,
-                                                              detail::FunctionTraits<T, F>::ObjectType>::value>::type>
-    bool subscribe(const std::string &topic_, T &object_, F receiver_)
-    {
-        using TargetType = detail::FunctionTraits<T, F>::TargetType;
-        using FuncType   = detail::FunctionTraits<T, F>::FuncType;
-
-        return subscribe(topic_, Callable::make<TargetType &> (
-            static_cast<TargetType &>(object_),
-            static_cast<FuncType>(receiver_) ));
-    }
-    template <typename T, typename F,
-        typename = typename std::enable_if<std::is_same<std::remove_cv<T>::type,
-                                                        detail::FunctionTraits<T, F>::ObjectType>::value>::type>
+    template <
+        typename T,
+        typename F,
+        typename Traits = detail::BoundFunctionTraits<T *, F>,
+        typename = typename Traits::FuncType>
     bool subscribe(const std::string &topic_, T *object_, F receiver_)
     {
-        using TargetType = detail::FunctionTraits<T, F>::TargetType;
-        using FuncType = detail::FunctionTraits<T, F>::FuncType;
-
-        return subscribe(topic_, Callable::make<TargetType> (
-            static_cast<TargetType>(object_),
-            static_cast<FuncType>(receiver_) ));
-    }*/
+        return subscribe(topic_, Callable::make<Traits>(object_, receiver_));
+    }
 
     bool unsubscribe(const std::string &topic_, Callable receiver_)
     {

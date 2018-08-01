@@ -15,6 +15,7 @@ namespace edict
 namespace detail
 {
 
+// Abstract implementation for the Callabe type-erasure type =================================
 class CallableImpl
 {
 public:
@@ -30,6 +31,7 @@ public:
     virtual void invoke(const std::string &data_) const = 0;
 };
 
+// Specialisation to handle free functions ===================================================
 class FreeFunctionPointer final : public CallableImpl
 {
 public:
@@ -56,66 +58,111 @@ private:
     const Receiver m_receiver;
 };
 
-template <typename T, bool isConst = false>
-struct BoundFunctionTraits
+// Helper to ensure some type is either a pointer or a reference =============================
+template <typename T, bool IsPointer>
+struct MaybePointer
 {
-    using Receiver = void(T::*)(const std::string &);
+    using Type = T & ;
 };
 template <typename T>
-struct BoundFunctionTraits<T, true>
+struct MaybePointer<T, true>
 {
-    using Receiver = void(T::*)(const std::string &) const;
+    using Type = T * ;
 };
 
-template <typename T, bool isPointer = false>
-struct BoundObjectTraits
-{
-    using BaseType = typename std::remove_reference<T>::type;
-    using BoundType = typename BaseType &;
-    using Receiver = typename BoundFunctionTraits<typename std::remove_const<BaseType>::type,
-                                                  std::is_const<T>::value>::Receiver;
-
-    static void invoke(BoundType obj_, Receiver receiver_, const std::string &data_)
-    {
-        (obj_.*receiver_)(data_);
-    }
-};
+// "Extreme" variant of decay to remove *all* qualifiers from a type =========================
 template <typename T>
-struct BoundObjectTraits<T, true>
-{
-    using BaseType = typename std::remove_pointer<T>::type;
-    using BoundType = typename BaseType * const;
-    using Receiver = typename BoundFunctionTraits<typename std::remove_const<BaseType>::type,
-                                                  std::is_const<T>::value>::Receiver;
+using Decompose = typename std::remove_cv<typename std::remove_pointer<T>::type>::type;
 
-    static void invoke(BoundType obj_, Receiver receiver_, const std::string &data_)
+// Traits for invoking bound functions =======================================================
+template <typename T, typename... Args> struct BoundFunctionInvokeTraits {};
+
+template <typename T, typename... Args>
+struct BoundFunctionInvokeTraits<T &, Args...>
+{
+    using _T = typename Decompose<T>;
+
+    static void invoke(T &object_, void(_T::*func_)(Args...), Args &&...args_)
     {
-        (obj_->*receiver_)(data_);
+        (object_.*func_)(std::forward<Args>(args_)...);
     }
 };
 
-template <typename T>
-class BoundFunctionPointerTraits
+template <typename T, typename... Args>
+struct BoundFunctionInvokeTraits<T *, Args...>
 {
-    using _Traits = BoundObjectTraits<T, std::is_pointer<T>::value>;
+    using _T = typename Decompose<T>;
 
-public:
-    using BoundType = typename _Traits::BoundType;
-    using Receiver  = typename _Traits::Receiver;
-
-    static void invoke(BoundType obj_, Receiver receiver_, const std::string &data_)
+    static void invoke(T *object_, void(_T::*func_)(Args...), Args &&...args_)
     {
-        _Traits::invoke(obj_, receiver_, data_);
+        (object_->*func_)(std::forward<Args>(args_)...);
     }
 };
 
+// Traits for bound functions ================================================================
+template <bool IsSame, bool IsObjectConst, bool IsMethodConst, bool IsPointer,
+          typename T, typename... Args>
+struct BoundFunctionTraitsBase {};
 
-template <typename T, typename Traits = BoundFunctionPointerTraits<T>>
+template <bool IsObjectConst, bool IsPointer, typename T, typename... Args>
+struct BoundFunctionTraitsBase<true, IsObjectConst, true, IsPointer, T, Args...>
+{
+    using ObjectType = const typename MaybePointer<T, IsPointer>::Type;
+    using FuncType   = void (T::*)(Args...) const;
+};
+
+template <bool IsPointer, typename T, typename... Args>
+struct BoundFunctionTraitsBase<true, false, false, IsPointer, T, Args...>
+{
+    using ObjectType = typename MaybePointer<T, IsPointer>::Type;
+    using FuncType   = void(T::*)(Args...);
+};
+
+template <typename T, typename F> struct BoundFunctionTraits {};
+
+template <typename T1, typename T2, typename ...Args>
+struct BoundFunctionTraits<T1, void(T2::*)(Args...)>
+{
+    using _BaseTraits = BoundFunctionTraitsBase<
+        std::is_same<typename Decompose<T1>, typename Decompose<T2>>::value,
+        std::is_const<T1>::value, false, std::is_pointer<T1>::value,
+        typename Decompose<T1>, Args...>;
+
+    using ObjectType = typename _BaseTraits::ObjectType;
+    using FuncType   = typename _BaseTraits::FuncType;
+
+    static void invoke(ObjectType object_, FuncType func_, Args &&... args_)
+    {
+        BoundFunctionInvokeTraits<ObjectType, Args...>::invoke(
+            object_, func_, std::forward<Args>(args_)...);
+    }
+};
+
+template <typename T1, typename T2, typename ...Args>
+struct BoundFunctionTraits<T1, void(T2::*)(Args...) const>
+{
+    using _BaseTraits = BoundFunctionTraitsBase<
+        std::is_same<typename Decompose<T1>, typename Decompose<T2>>::value,
+        std::is_const<T1>::value, true, std::is_pointer<T1>::value,
+        typename Decompose<T1>, Args...>;
+
+    using ObjectType = typename _BaseTraits::ObjectType;
+    using FuncType = typename _BaseTraits::FuncType;
+
+    static void invoke(ObjectType object_, FuncType func_, Args &&... args_)
+    {
+        BoundFunctionInvokeTraits<ObjectType, Args...>::invoke(
+            object_, func_, std::forward<Args>(args_)...);
+    }
+};
+
+// Specialisation to handle bound functions ==================================================
+template <typename Traits>
 class BoundFunctionPointer final : public CallableImpl
 {
 public:
-    using BoundType = typename Traits::BoundType;
-    using Receiver  = typename Traits::Receiver;
+    using BoundType = typename Traits::ObjectType;
+    using Receiver  = typename Traits::FuncType;
 
     explicit BoundFunctionPointer(BoundType object_, Receiver receiver_) :
         m_object(object_),
@@ -125,7 +172,7 @@ public:
 
     bool isEqual(CallableImpl *other_) const override
     {
-        if (auto *o = dynamic_cast<BoundFunctionPointer<T> *>(other_))
+        if (auto *o = dynamic_cast<BoundFunctionPointer<Traits> *>(other_))
             return m_object == o->m_object && m_receiver == o->m_receiver;
 
         return false;
@@ -147,30 +194,17 @@ class Callable final
 {
 public:
     using FreeReceiver = detail::FreeFunctionPointer::Receiver;
-    template <typename T>
-    using BoundType = typename detail::BoundFunctionPointer<T>::BoundType;
-    template <typename T>
-    using BoundReceiver = typename detail::BoundFunctionPointer<T>::Receiver;
 
-    template <typename T /*, typename = std::enable_if<std::is_pointer<T>::value>::type*/>
-    static Callable make(T *object_, BoundReceiver<T *> receiver_)
+    template <typename Traits>
+    static Callable make(typename Traits::ObjectType object_,
+                         typename Traits::FuncType receiver_)
     {
         Callable c;
 
-        c.m_d = std::make_shared<detail::BoundFunctionPointer<T *>>(object_, receiver_);
+        c.m_d = std::make_shared<detail::BoundFunctionPointer<Traits>>(object_, receiver_);
 
         return c;
     }
-    template <typename T/*, typename = std::enable_if<!std::is_pointer<T>::value>::type*/>
-    static Callable make(T &object_, BoundReceiver<T> receiver_)
-    {
-        Callable c;
-
-        c.m_d = std::make_shared<detail::BoundFunctionPointer<T>>(object_, receiver_);
-
-        return c;
-    }
-
 
     Callable() :
         m_d()
