@@ -84,7 +84,7 @@ int main(int argc, char **argv)
     auto pronter = make_unique<IndirectPrinter>("OnkJot");
     broadcaster.subscribe("/edict/hello", pronter.get(), &IndirectPrinter::print);
 
-	broadcaster.publish("/edict/hello", "Hello");
+    broadcaster.publish("/edict/hello", "Hello");
     broadcaster.publish("1234", "Bye");
 
     return 0;

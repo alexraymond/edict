@@ -109,7 +109,13 @@ struct BoundFunctionInvokeTraits<T *, F, Args...>
 // Traits for bound functions ================================================================
 template <bool IsSame, bool IsObjectConst, bool IsMethodConst, bool IsPointer,
           typename T, typename... Args>
-struct BoundFunctionTraitsBase {};
+struct BoundFunctionTraitsBase
+{
+    static_assert(!IsObjectConst || IsMethodConst,
+                  "edict error: You can't bind non-const functions to const objects.");
+
+    static_assert(IsSame, "edict error: Function pointer must reference a method of passed object.");
+};
 
 template <bool IsObjectConst, bool IsPointer, typename T, typename... Args>
 struct BoundFunctionTraitsBase<true, IsObjectConst, true, IsPointer, T, Args...>
