@@ -10,9 +10,6 @@
 #include <edict/Single.h>
 using namespace edict;
 
-#include <iostream>
-#include <memory>
-#include <regex>
 using namespace std;
 
 

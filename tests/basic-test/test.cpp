@@ -1,11 +1,11 @@
 #include <edict/Broadcaster.h>
 #include <edict/Single.h>
 using namespace edict;
-using namespace std;
 
 #include <catch.hpp>
 
 #include <regex>
+using namespace std;
 
 
 class TestPublisher
