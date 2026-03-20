@@ -1,6 +1,7 @@
 #pragma once
 
 #include <concepts>
+#include <mutex>
 #include <shared_mutex>
 
 namespace edict {

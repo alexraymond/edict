@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 #include <edict/Broadcaster.h>
 #include <edict/Channel.h>
+#include <stdexcept>
 #include <vector>
 
 TEST_CASE("Channel: publish during publish") {
