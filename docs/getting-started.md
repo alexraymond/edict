@@ -5,125 +5,167 @@ nav_order: 2
 ---
 
 # Getting Started
-{: .no_toc }
 
-Build your first Edict program in under 5 minutes.
-{: .fs-6 .fw-300 }
+This page walks you through your first Edict program: subscribe, publish, and unsubscribe.
 
-## Table of contents
-{: .no_toc .text-delta }
-
-1. TOC
-{:toc}
-
----
-
-## Step 1: Include the header
+## Your first program
 
 ```cpp
-#include <edict/Broadcaster.h>
-```
-
-That's the only header you need for pub/sub. (`edict/edict.h` includes everything if you prefer.)
-
-## Step 2: Create a Broadcaster
-
-```cpp
-edict::Broadcaster<> bus;
-```
-
-A Broadcaster routes messages by topic string. The `<>` means single-threaded (zero overhead). For multi-threaded use, write `edict::SharedBroadcaster`.
-
-## Step 3: Subscribe
-
-```cpp
-auto sub = bus.subscribe("greet", [](const std::string& name) {
-    std::cout << "Hello, " << name << "!\n";
-});
-```
-
-`subscribe()` returns a `Subscription` — a move-only RAII handle. **You must store it.** If you don't, the subscription is immediately destroyed and the handler never fires.
-
-{: .warning }
-> `subscribe()` is `[[nodiscard]]`. Ignoring the return value unsubscribes immediately.
-> ```cpp
-> bus.subscribe("greet", handler);  // BUG: subscription dies instantly
-> auto sub = bus.subscribe("greet", handler);  // correct
-> ```
-
-## Step 4: Publish
-
-```cpp
-bus.publish("greet", std::string("World"));   // prints: Hello, World!
-bus.publish("greet", std::string("Edict"));   // prints: Hello, Edict!
-```
-
-Every subscriber fires synchronously, in priority order, inside the `publish()` call.
-
-## Step 5: Unsubscribe
-
-Just let the subscription go out of scope:
-
-```cpp
-{
-    auto sub = bus.subscribe("greet", handler);
-    bus.publish("greet", std::string("yes"));   // handler fires
-}
-bus.publish("greet", std::string("no"));        // handler does NOT fire — sub is dead
-```
-
-Or cancel explicitly:
-
-```cpp
-sub.cancel();
-```
-
----
-
-## Complete example
-
-```cpp
-#include <edict/Broadcaster.h>
+#include <edict/edict.h>
 #include <iostream>
 #include <string>
 
-void on_greet(const std::string& name) {
-    std::cout << "Hello, " << name << "!\n";
-}
-
 int main() {
-    edict::Broadcaster<> bus;
+    edict::Broadcaster bus;
 
-    // Free function
-    auto s1 = bus.subscribe("greet", on_greet);
-
-    // Lambda
-    auto s2 = bus.subscribe("greet", [](const std::string& name) {
-        std::cout << "  (whispers) hey " << name << "...\n";
+    // Subscribe to "greet" -- receives a std::string
+    auto sub = bus.subscribe("greet", [](std::string name) {
+        std::cout << "Hello, " << name << "!\n";
     });
 
-    // Zero-arg watcher — doesn't need the data, just wants notification
-    auto s3 = bus.subscribe("greet", []() {
-        std::cout << "  [someone was greeted]\n";
-    });
-
+    // Publish a message
     bus.publish("greet", std::string("World"));
-    // Hello, World!
-    //   (whispers) hey World...
-    //   [someone was greeted]
+    bus.publish("greet", std::string("Edict"));
 
-    s2.cancel();  // unsubscribe the whisperer
-
-    bus.publish("greet", std::string("Again"));
-    // Hello, Again!
-    //   [someone was greeted]
+    // sub goes out of scope here and automatically unsubscribes
+    return 0;
 }
 ```
 
-## What's next?
+Output:
+```
+Hello, World!
+Hello, Edict!
+```
 
-- [Broadcaster](broadcaster) — wildcards, predicates, filters, queue/dispatch
-- [Blackboard](blackboard) — typed state store
-- [Threading](threading) — multi-threaded usage
-- [How-To Recipes](how-to) — common patterns
-- [Typed Channels](channels) — advanced: zero-cost typed dispatch for hot paths
+## What just happened?
+
+1. **`bus.subscribe("greet", ...)`** registers a lambda that listens on the `"greet"` topic. It returns a `Subscription` handle.
+2. **`bus.publish("greet", std::string("World"))`** sends a message to all subscribers on `"greet"`. The lambda fires immediately.
+3. When `sub` is destroyed at the end of `main()`, it automatically unsubscribes. No manual cleanup needed.
+
+## The [[nodiscard]] warning
+
+`subscribe()` is marked `[[nodiscard]]`. If you ignore the return value, the subscription is destroyed immediately and your handler never fires.
+
+{: .warning }
+This is the most common mistake with Edict. Always store the returned `Subscription`.
+
+```cpp
+// WRONG: subscription immediately destroyed, handler never called
+bus.subscribe("topic", []() { std::cout << "never prints\n"; });
+
+// RIGHT: subscription kept alive
+auto sub = bus.subscribe("topic", []() { std::cout << "prints!\n"; });
+```
+
+## Early unsubscribe
+
+Call `cancel()` to unsubscribe before the handle is destroyed:
+
+```cpp
+#include <edict/edict.h>
+#include <iostream>
+#include <string>
+
+int main() {
+    edict::Broadcaster bus;
+
+    auto sub = bus.subscribe("ping", [](std::string msg) {
+        std::cout << "Got: " << msg << "\n";
+    });
+
+    bus.publish("ping", std::string("first"));
+
+    sub.cancel();  // unsubscribe now
+
+    bus.publish("ping", std::string("second"));  // no output
+
+    return 0;
+}
+```
+
+Output:
+```
+Got: first
+```
+
+## Multiple subscribers
+
+Multiple subscribers on the same topic all receive every message:
+
+```cpp
+#include <edict/edict.h>
+#include <iostream>
+#include <string>
+
+int main() {
+    edict::Broadcaster bus;
+
+    auto logger = bus.subscribe("event", [](std::string msg) {
+        std::cout << "[LOG] " << msg << "\n";
+    });
+
+    auto counter_value = 0;
+    auto counter = bus.subscribe("event", [&counter_value]() {
+        ++counter_value;
+    });
+
+    bus.publish("event", std::string("player_joined"));
+    bus.publish("event", std::string("player_left"));
+
+    std::cout << "Total events: " << counter_value << "\n";
+
+    return 0;
+}
+```
+
+Output:
+```
+[LOG] player_joined
+[LOG] player_left
+Total events: 2
+```
+
+Notice the counter lambda takes zero arguments even though the publisher sends a `std::string`. This is partial argument matching -- subscribers can accept fewer arguments than published.
+
+## Managing multiple subscriptions
+
+Use `SubscriptionGroup` to manage several subscriptions together:
+
+```cpp
+#include <edict/edict.h>
+#include <iostream>
+
+int main() {
+    edict::Broadcaster bus;
+
+    edict::SubscriptionGroup group;
+    group += bus.subscribe("health", [](int hp) {
+        std::cout << "HP: " << hp << "\n";
+    });
+    group += bus.subscribe("mana", [](int mp) {
+        std::cout << "MP: " << mp << "\n";
+    });
+
+    bus.publish("health", 100);
+    bus.publish("mana", 50);
+
+    group.cancel_all();  // unsubscribe everything at once
+
+    bus.publish("health", 0);  // no output
+    bus.publish("mana", 0);    // no output
+
+    return 0;
+}
+```
+
+Output:
+```
+HP: 100
+MP: 50
+```
+
+## Next steps
+
+The [User Guide](guide) covers every feature in depth: wildcards, priorities, queuing, blackboards, threading, and more.
