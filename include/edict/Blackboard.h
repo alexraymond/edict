@@ -4,6 +4,7 @@
 #include <edict/Error.h>
 #include <edict/Policy.h>
 #include <edict/Subscription.h>
+#include <edict/detail/Traits.h>
 
 #include <algorithm>
 #include <any>
@@ -77,7 +78,9 @@ public:
     }
 
     /// Observe changes to a key. T must match the type passed to set().
+    /// Handler can take (optional<T>, T), (optional<T>), or () for partial matching.
     template <typename T, typename F>
+        requires detail::has_callable_traits_v<F>
     [[nodiscard]] Subscription observe(std::string_view key, F&& handler,
                                         SubscribeOptions opts = {}) {
         return state_->broadcaster.subscribe(std::string(key),

@@ -4,6 +4,7 @@
 #include <edict/Policy.h>
 #include <edict/Subscription.h>
 #include <edict/TopicRouter.h>
+#include <edict/detail/TopicTree.h>
 #include <edict/detail/Traits.h>
 
 #include <algorithm>
@@ -13,7 +14,6 @@
 #include <deque>
 #include <functional>
 #include <memory>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -39,77 +39,58 @@ public:
 
     // ── Subscribe: exact topic + callable ────────────────────────────────
 
-    /// Subscribe to an exact topic. Partial arg matching supported.
     template <typename F>
         requires detail::has_callable_traits_v<F>
     [[nodiscard]] Subscription subscribe(std::string_view topic, F&& handler,
                                           SubscribeOptions opts = {}) {
         auto id = allocate_id();
         auto erased = make_erased(std::forward<F>(handler));
-
         {
             typename Policy::UniqueLock lock(state_->mutex);
             state_->router.add_exact(std::string(topic), id);
             state_->entries.emplace(id, SubscriptionEntry{
                 erased, opts.priority, std::string(topic), {}});
         }
-
-        replay_retained(id, topic, erased, opts);
+        replay_retained(topic, erased, {}, opts);
         return make_subscription(id);
     }
 
-    // ── Subscribe: exact topic + member function ─────────────────────────
-
-    /// Subscribe a member function to an exact topic.
     template <typename T, typename MF>
     [[nodiscard]] Subscription subscribe(std::string_view topic, T* obj, MF method,
                                           SubscribeOptions opts = {}) {
         return subscribe(topic, detail::bind_member(obj, method), opts);
     }
 
-    // ── Subscribe: wildcard pattern ──────────────────────────────────────
-
-    /// Subscribe to a wildcard pattern (* and **).
     template <typename F>
         requires detail::has_callable_traits_v<F>
     [[nodiscard]] Subscription subscribe_pattern(std::string_view pattern, F&& handler,
                                                   SubscribeOptions opts = {}) {
         auto id = allocate_id();
         auto erased = make_erased(std::forward<F>(handler));
-
         {
             typename Policy::UniqueLock lock(state_->mutex);
             state_->router.add_pattern(pattern, id);
             state_->entries.emplace(id, SubscriptionEntry{
                 std::move(erased), opts.priority, std::string(pattern), {}});
         }
-
         return make_subscription(id);
     }
 
-    // ── Subscribe: predicate-based topic matching ────────────────────────
-
-    /// Subscribe with a custom topic predicate.
     template <typename Pred, typename F>
         requires std::invocable<Pred, std::string_view> && detail::has_callable_traits_v<F>
     [[nodiscard]] Subscription subscribe(Pred&& predicate, F&& handler,
                                           SubscribeOptions opts = {}) {
         auto id = allocate_id();
         auto erased = make_erased(std::forward<F>(handler));
-
         {
             typename Policy::UniqueLock lock(state_->mutex);
             state_->router.add_predicate(std::forward<Pred>(predicate), id);
             state_->entries.emplace(id, SubscriptionEntry{
                 std::move(erased), opts.priority, {}, {}});
         }
-
         return make_subscription(id);
     }
 
-    // ── Subscribe: exact topic + callable + filter ────────────────────────
-
-    /// Subscribe with a data filter. Handler only called when filter passes.
     template <typename F, typename Pred>
         requires detail::has_callable_traits_v<F>
     [[nodiscard]] Subscription subscribe(std::string_view topic, F&& handler,
@@ -117,35 +98,31 @@ public:
         auto id = allocate_id();
         auto erased = make_erased(std::forward<F>(handler));
         auto erased_filter = make_erased_filter(std::move(filt.predicate));
-
         {
             typename Policy::UniqueLock lock(state_->mutex);
             state_->router.add_exact(std::string(topic), id);
             state_->entries.emplace(id, SubscriptionEntry{
-                erased, opts.priority, std::string(topic),
-                erased_filter});
+                erased, opts.priority, std::string(topic), erased_filter});
         }
-
-        replay_retained(id, topic, erased, opts);
+        replay_retained(topic, erased, erased_filter, opts);
         return make_subscription(id);
     }
 
     // ── Retain ──────────────────────────────────────────────────────────
 
-    /// Enable message retention. Last count messages stored per topic. Pass 0 to disable.
     void retain(std::string_view topic, std::size_t count) {
         typename Policy::UniqueLock lock(state_->mutex);
+        auto key = std::string(topic);
         if (count == 0) {
-            state_->retention_config.erase(std::string(topic));
-            state_->retained_messages.erase(std::string(topic));
+            state_->retention_config.erase(key);
+            state_->retained_messages.erase(key);
         } else {
-            state_->retention_config[std::string(topic)] = count;
+            state_->retention_config[key] = count;
         }
     }
 
     // ── Publish ──────────────────────────────────────────────────────────
 
-    /// Publish to all matching subscribers. Reentrant-safe.
     template <typename... Args>
     void publish(std::string_view topic, const Args&... args) {
         std::vector<std::any> packed;
@@ -154,61 +131,20 @@ public:
             (packed.emplace_back(args), ...);
         }
 
-        const auto this_thread = std::this_thread::get_id();
-        const bool reentrant = (state_->dispatching_thread.load() == this_thread);
-
-        std::vector<SubscriptionEntry> snapshot;
-        {
-            std::optional<typename Policy::UniqueLock> lock;
-            if (!reentrant) {
-                lock.emplace(state_->mutex);
-                state_->dispatching_thread.store(this_thread);
-            }
-            state_->router.match(topic, [&](TopicRouter::Id id) {
-                if (auto it = state_->entries.find(id); it != state_->entries.end())
-                    snapshot.push_back(it->second);
-            });
-        }
-
-        std::stable_sort(snapshot.begin(), snapshot.end(),
-            [](const SubscriptionEntry& a, const SubscriptionEntry& b) {
-                return a.priority > b.priority;
-            });
-
         auto topic_str = std::string(topic);
-        for (const auto& entry : snapshot) {
-            if (entry.filter && !entry.filter(packed))
-                continue;
-            try {
-                entry.callable(packed);
-            } catch (...) {
-                try {
-                    if (state_->error_handler)
-                        state_->error_handler(std::current_exception(), topic_str);
-                } catch (...) {}
-            }
-        }
 
-        // Store retained message
-        {
-            std::optional<typename Policy::UniqueLock> lock;
-            if (!reentrant) lock.emplace(state_->mutex);
-            auto rit = state_->retention_config.find(topic_str);
-            if (rit != state_->retention_config.end()) {
-                auto& msgs = state_->retained_messages[topic_str];
-                msgs.push_back(RetainedMessage{packed});
-                while (msgs.size() > rit->second)
-                    msgs.pop_front();
-            }
-        }
+        // Step 1: collect snapshot under lock, then release
+        auto snapshot = collect_snapshot(topic);
 
-        if (!reentrant)
-            state_->dispatching_thread.store(std::thread::id{});
+        // Step 2: dispatch outside lock (callbacks may re-enter)
+        dispatch_to(snapshot, packed, topic_str);
+
+        // Step 3: store retained under lock
+        store_retained(topic_str, packed);
     }
 
     // ── Queue / Dispatch ─────────────────────────────────────────────────
 
-    /// Enqueue a message for deferred delivery.
     template <typename... Args>
     void queue(std::string_view topic, Args&&... args) {
         std::vector<std::any> packed;
@@ -216,64 +152,25 @@ public:
             packed.reserve(sizeof...(Args));
             (packed.emplace_back(std::forward<Args>(args)), ...);
         }
-
         typename Policy::UniqueLock lock(state_->mutex);
         state_->message_queue.emplace_back(
             QueuedMessage{std::string(topic), std::move(packed)});
     }
 
-    /// Deliver all queued messages in FIFO order.
     void dispatch() {
-        const auto this_thread = std::this_thread::get_id();
-        const bool reentrant = (state_->dispatching_thread.load() == this_thread);
-
         std::vector<QueuedMessage> pending;
         {
-            std::optional<typename Policy::UniqueLock> lock;
-            if (!reentrant) {
-                lock.emplace(state_->mutex);
-                state_->dispatching_thread.store(this_thread);
-            }
+            typename Policy::UniqueLock lock(state_->mutex);
             pending.swap(state_->message_queue);
         }
-
         for (auto& msg : pending) {
-            std::vector<SubscriptionEntry> snapshot;
-            {
-                std::optional<typename Policy::UniqueLock> lock;
-                if (!reentrant) lock.emplace(state_->mutex);
-                state_->router.match(msg.topic, [&](TopicRouter::Id id) {
-                    if (auto it = state_->entries.find(id); it != state_->entries.end())
-                        snapshot.push_back(it->second);
-                });
-            }
-
-            std::stable_sort(snapshot.begin(), snapshot.end(),
-                [](const SubscriptionEntry& a, const SubscriptionEntry& b) {
-                    return a.priority > b.priority;
-                });
-
-            for (const auto& entry : snapshot) {
-                if (entry.filter && !entry.filter(msg.packed))
-                    continue;
-                try {
-                    entry.callable(msg.packed);
-                } catch (...) {
-                    try {
-                        if (state_->error_handler)
-                            state_->error_handler(std::current_exception(), msg.topic);
-                    } catch (...) {}
-                }
-            }
+            auto snapshot = collect_snapshot(msg.topic);
+            dispatch_to(snapshot, msg.packed, msg.topic);
         }
-
-        if (!reentrant)
-            state_->dispatching_thread.store(std::thread::id{});
     }
 
     // ── Error handler ────────────────────────────────────────────────────
 
-    /// Set callback for subscriber exceptions.
     void set_error_handler(ErrorHandler handler) {
         typename Policy::UniqueLock lock(state_->mutex);
         state_->error_handler = std::move(handler);
@@ -281,28 +178,23 @@ public:
 
     // ── Introspection ────────────────────────────────────────────────────
 
-    /// Number of subscribers matching this exact topic.
     [[nodiscard]] std::size_t subscriber_count(std::string_view topic) const {
-        typename Policy::UniqueLock lock(state_->mutex);
+        typename Policy::SharedLock lock(state_->mutex);
         return state_->router.subscriber_count(topic);
     }
 
-    /// True if any subscriber would receive a publish on this topic.
     [[nodiscard]] bool has_subscribers(std::string_view topic) const {
-        typename Policy::UniqueLock lock(state_->mutex);
+        typename Policy::SharedLock lock(state_->mutex);
         return state_->router.has_subscribers(topic);
     }
 
-    /// Returns topics with exact-match subscribers. Does not include
-    /// wildcard patterns or predicate-based subscriptions.
     [[nodiscard]] std::vector<std::string> active_topics() const {
-        typename Policy::UniqueLock lock(state_->mutex);
+        typename Policy::SharedLock lock(state_->mutex);
         return state_->router.active_topics();
     }
 
 private:
     using ErasedCallable = std::function<void(const std::vector<std::any>&)>;
-
     using ErasedFilter = std::function<bool(const std::vector<std::any>&)>;
 
     struct SubscriptionEntry {
@@ -310,10 +202,6 @@ private:
         int priority;
         std::string topic;
         ErasedFilter filter;
-    };
-
-    struct RetainedMessage {
-        std::vector<std::any> packed;
     };
 
     struct QueuedMessage {
@@ -328,35 +216,95 @@ private:
         ErrorHandler error_handler;
         std::uint64_t next_id = 1;
         std::unordered_map<std::string, std::size_t> retention_config;
-        std::unordered_map<std::string, std::deque<RetainedMessage>> retained_messages;
+        std::unordered_map<std::string, std::deque<std::vector<std::any>>> retained_messages;
         mutable typename Policy::Mutex mutex;
+        // Tracks the thread currently dispatching, for safe reentrant cancel().
         std::atomic<std::thread::id> dispatching_thread{};
     };
 
     std::shared_ptr<State> state_;
 
-    // Replay retained messages to a newly subscribed callable.
-    // Copies the callable by value to avoid dangling references (Sutter fix #1).
-    void replay_retained(TopicRouter::Id id, std::string_view topic,
-                         const ErasedCallable& callable, const SubscribeOptions& opts) {
+    // ── Core helpers ─────────────────────────────────────────────────────
+
+    // Collect matching entries into a priority-sorted snapshot.
+    // Lock is acquired and released within this call.
+    std::vector<SubscriptionEntry> collect_snapshot(std::string_view topic) {
+        std::vector<SubscriptionEntry> snapshot;
+        {
+            typename Policy::UniqueLock lock(state_->mutex);
+            state_->router.match(topic, [&](TopicRouter::Id id) {
+                if (auto it = state_->entries.find(id); it != state_->entries.end())
+                    snapshot.push_back(it->second);
+            });
+        }
+        std::stable_sort(snapshot.begin(), snapshot.end(),
+            [](const SubscriptionEntry& a, const SubscriptionEntry& b) {
+                return a.priority > b.priority;
+            });
+        return snapshot;
+    }
+
+    // Dispatch to a snapshot of entries. No lock held — callbacks may re-enter.
+    // Sets dispatching_thread for the duration so that cancel() from within
+    // a callback can skip lock acquisition (avoiding deadlock on non-recursive mutex).
+    void dispatch_to(const std::vector<SubscriptionEntry>& snapshot,
+                     const std::vector<std::any>& packed,
+                     const std::string& topic_str) {
+        auto tid = std::this_thread::get_id();
+        bool was_dispatching =
+            (state_->dispatching_thread.load(std::memory_order_acquire) == tid);
+
+        if (!was_dispatching)
+            state_->dispatching_thread.store(tid, std::memory_order_release);
+
+        for (const auto& entry : snapshot) {
+            if (entry.filter && !entry.filter(packed))
+                continue;
+            try {
+                entry.callable(packed);
+            } catch (...) {
+                try {
+                    if (state_->error_handler)
+                        state_->error_handler(std::current_exception(), topic_str);
+                } catch (...) {}
+            }
+        }
+
+        if (!was_dispatching)
+            state_->dispatching_thread.store(std::thread::id{}, std::memory_order_release);
+    }
+
+    void store_retained(const std::string& topic_str,
+                        const std::vector<std::any>& packed) {
+        typename Policy::UniqueLock lock(state_->mutex);
+        auto rit = state_->retention_config.find(topic_str);
+        if (rit != state_->retention_config.end()) {
+            auto& msgs = state_->retained_messages[topic_str];
+            msgs.push_back(packed);
+            while (msgs.size() > rit->second)
+                msgs.pop_front();
+        }
+    }
+
+    void replay_retained(std::string_view topic,
+                         const ErasedCallable& callable,
+                         const ErasedFilter& filt,
+                         const SubscribeOptions& opts) {
         if (!opts.replay) return;
 
-        std::deque<RetainedMessage> to_replay;
-        ErasedFilter entry_filter;
+        std::deque<std::vector<std::any>> to_replay;
         {
             typename Policy::UniqueLock lock(state_->mutex);
             auto rit = state_->retained_messages.find(std::string(topic));
             if (rit != state_->retained_messages.end())
                 to_replay = rit->second;
-            if (auto eit = state_->entries.find(id); eit != state_->entries.end())
-                entry_filter = eit->second.filter;
         }
-        // Dispatch outside lock, using copies — no dangling refs
+
         auto topic_str = std::string(topic);
-        for (const auto& msg : to_replay) {
+        for (const auto& packed : to_replay) {
+            if (filt && !filt(packed)) continue;
             try {
-                if (!entry_filter || entry_filter(msg.packed))
-                    callable(msg.packed);
+                callable(packed);
             } catch (...) {
                 try {
                     if (state_->error_handler)
@@ -371,16 +319,17 @@ private:
         return state_->next_id++;
     }
 
+    // Create a Subscription whose remover safely removes the entry.
+    // If cancel() is called from within a dispatch callback (same thread),
+    // skip lock acquisition to avoid deadlock on non-recursive shared_mutex.
     Subscription make_subscription(TopicRouter::Id id) {
         auto weak = std::weak_ptr<State>(state_);
         return Subscription(id, [weak, id]() noexcept {
             if (auto s = weak.lock()) {
                 try {
-                    const auto this_thread = std::this_thread::get_id();
-                    const bool reentrant =
-                        (s->dispatching_thread.load() == this_thread);
-                    std::optional<typename Policy::UniqueLock> lock;
-                    if (!reentrant) lock.emplace(s->mutex);
+                    // Safe to lock even from within a callback — the mutex is
+                    // never held during dispatch_to() callback invocation.
+                    typename Policy::UniqueLock lock(s->mutex);
                     s->router.remove(id);
                     s->entries.erase(id);
                 } catch (...) {}
@@ -388,14 +337,13 @@ private:
         });
     }
 
+    // ── Type erasure helpers ─────────────────────────────────────────────
+
     template <typename F>
     static ErasedCallable make_erased(F&& handler) {
         constexpr auto arity = detail::callable_arity<F>;
-
         if constexpr (arity == 0) {
-            return [f = std::forward<F>(handler)](const std::vector<std::any>&) mutable {
-                f();
-            };
+            return [f = std::forward<F>(handler)](const std::vector<std::any>&) mutable { f(); };
         } else {
             return [f = std::forward<F>(handler)](const std::vector<std::any>& args) mutable {
                 if (args.size() < arity) return;
@@ -415,11 +363,8 @@ private:
     template <typename Pred>
     static ErasedFilter make_erased_filter(Pred&& pred) {
         constexpr auto arity = detail::callable_arity<Pred>;
-
         if constexpr (arity == 0) {
-            return [p = std::forward<Pred>(pred)](const std::vector<std::any>&) -> bool {
-                return p();
-            };
+            return [p = std::forward<Pred>(pred)](const std::vector<std::any>&) -> bool { return p(); };
         } else {
             return [p = std::forward<Pred>(pred)](const std::vector<std::any>& args) mutable -> bool {
                 if (args.size() < arity) return false;
