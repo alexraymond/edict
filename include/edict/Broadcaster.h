@@ -42,6 +42,7 @@ public:
         requires detail::has_callable_traits_v<F>
     [[nodiscard]] Subscription subscribe(std::string_view topic, F&& handler,
                                           SubscribeOptions opts = {}) {
+        // erased is deliberately copied (not moved) into the entry — replay_retained needs it below.
         auto erased = make_erased(std::forward<F>(handler));
         detail::TopicRouter::Id id;
         {
@@ -132,6 +133,9 @@ public:
 
     template <typename... Args>
     void publish(std::string_view topic, const Args&... args) {
+        if (!detail::TopicTree::validate_publish_topic(topic))
+            return; // invalid topic — no subscribers will match anyway
+
         std::vector<std::any> packed;
         if constexpr (sizeof...(Args) > 0) {
             packed.reserve(sizeof...(Args));
@@ -142,6 +146,9 @@ public:
 
         // Step 1: collect snapshot + store retained under lock
         auto snap = collect_snapshot(topic);
+        // Note: snapshot and retention are not atomically consistent — a concurrent
+        // retain(topic, 0) between these calls may clear retention before our store.
+        // This is acceptable: the message was already dispatched to current subscribers.
         store_retained(topic_str, packed);
 
         // Step 2: dispatch outside lock (callbacks may re-enter)
@@ -246,6 +253,9 @@ private:
             });
             snap.error_handler = state_->error_handler;
         }
+        // O(N log N) where N is matching subscribers. For hot paths with many
+        // subscribers on the same topic, use Channel<Args...> which maintains
+        // sorted order at insert time.
         std::stable_sort(snap.entries.begin(), snap.entries.end(),
             [](const SubscriptionEntry& a, const SubscriptionEntry& b) {
                 return a.priority > b.priority;

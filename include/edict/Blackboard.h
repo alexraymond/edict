@@ -91,7 +91,7 @@ public:
         return state_->store.contains(std::string(key));
     }
 
-    /// Remove a key.
+    /// Remove a key. Does NOT fire observers (erase has no knowledge of the stored type).
     void erase(std::string_view key) {
         typename Policy::UniqueLock lock(state_->mutex);
         state_->store.erase(std::string(key));

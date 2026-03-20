@@ -146,3 +146,19 @@ TEST_CASE("Blackboard: keys()") {
     std::sort(k.begin(), k.end());
     CHECK(k == std::vector<std::string>{"a", "b", "c"});
 }
+
+TEST_CASE("Blackboard: set with different type — old value is nullopt") {
+    edict::Blackboard<> bb;
+    bb.set("key", 42);
+
+    std::optional<std::string> old_val_seen;
+    bool fired = false;
+    auto obs = bb.observe<std::string>("key", [&](std::optional<std::string> old_v, const std::string& new_v) {
+        old_val_seen = old_v;
+        fired = true;
+    });
+
+    bb.set("key", std::string("hello"));
+    CHECK(fired);
+    CHECK_FALSE(old_val_seen.has_value()); // old was int, new is string — old is nullopt
+}

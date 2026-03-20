@@ -1,4 +1,5 @@
 #include <doctest/doctest.h>
+#include <edict/Blackboard.h>
 #include <edict/Broadcaster.h>
 #include <atomic>
 #include <thread>
@@ -81,4 +82,27 @@ TEST_CASE("SharedBroadcaster: self-cancel during dispatch does not deadlock") {
     CHECK(count == 1);
     bus.publish("test");
     CHECK(count == 1); // cancelled
+}
+
+TEST_CASE("SharedBlackboard: concurrent set and get") {
+    edict::Blackboard<edict::MultiThreaded> bb;
+    std::atomic<int> observations{0};
+
+    auto obs = bb.observe<int>("counter", [&]() {
+        observations.fetch_add(1, std::memory_order_relaxed);
+    });
+
+    constexpr int num_threads = 4;
+    std::vector<std::thread> threads;
+    for (int i = 0; i < num_threads; ++i) {
+        threads.emplace_back([&, i] {
+            for (int j = 0; j < 100; ++j) {
+                bb.set("counter", i * 100 + j);
+                auto val = bb.get<int>("counter");
+                CHECK(val.has_value());
+            }
+        });
+    }
+    for (auto& t : threads) t.join();
+    CHECK(observations == num_threads * 100);
 }
