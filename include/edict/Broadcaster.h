@@ -45,7 +45,21 @@ public:
             typename Policy::UniqueLock lock(state_->mutex);
             state_->router.add_exact(std::string(topic), id);
             state_->entries.emplace(id, SubscriptionEntry{
-                std::move(erased), opts.priority, std::string(topic)});
+                std::move(erased), opts.priority, std::string(topic), {}});
+        }
+
+        if (opts.replay) {
+            std::vector<RetainedMessage> to_replay;
+            {
+                typename Policy::UniqueLock lock(state_->mutex);
+                auto rit = state_->retained_messages.find(std::string(topic));
+                if (rit != state_->retained_messages.end())
+                    to_replay = rit->second;
+            }
+            auto& entry_ref = state_->entries.at(id);
+            for (const auto& msg : to_replay) {
+                try { entry_ref.callable(msg.packed); } catch (...) {}
+            }
         }
 
         return make_subscription(id);
@@ -72,7 +86,7 @@ public:
             typename Policy::UniqueLock lock(state_->mutex);
             state_->router.add_pattern(pattern, id);
             state_->entries.emplace(id, SubscriptionEntry{
-                std::move(erased), opts.priority, std::string(pattern)});
+                std::move(erased), opts.priority, std::string(pattern), {}});
         }
 
         return make_subscription(id);
@@ -91,10 +105,60 @@ public:
             typename Policy::UniqueLock lock(state_->mutex);
             state_->router.add_predicate(std::forward<Pred>(predicate), id);
             state_->entries.emplace(id, SubscriptionEntry{
-                std::move(erased), opts.priority, {}});
+                std::move(erased), opts.priority, {}, {}});
         }
 
         return make_subscription(id);
+    }
+
+    // ── Subscribe: exact topic + callable + filter ────────────────────────
+
+    template <typename F, typename Pred>
+        requires detail::has_callable_traits_v<F>
+    [[nodiscard]] Subscription subscribe(std::string_view topic, F&& handler,
+                                          Filter<Pred> filt, SubscribeOptions opts = {}) {
+        auto id = allocate_id();
+        auto erased = make_erased(std::forward<F>(handler));
+        auto erased_filter = make_erased_filter(std::move(filt.predicate));
+
+        {
+            typename Policy::UniqueLock lock(state_->mutex);
+            state_->router.add_exact(std::string(topic), id);
+            state_->entries.emplace(id, SubscriptionEntry{
+                std::move(erased), opts.priority, std::string(topic),
+                std::move(erased_filter)});
+        }
+
+        if (opts.replay) {
+            std::vector<RetainedMessage> to_replay;
+            {
+                typename Policy::UniqueLock lock(state_->mutex);
+                auto rit = state_->retained_messages.find(std::string(topic));
+                if (rit != state_->retained_messages.end())
+                    to_replay = rit->second;
+            }
+            auto& entry_ref = state_->entries.at(id);
+            for (const auto& msg : to_replay) {
+                try {
+                    if (!entry_ref.filter || entry_ref.filter(msg.packed))
+                        entry_ref.callable(msg.packed);
+                } catch (...) {}
+            }
+        }
+
+        return make_subscription(id);
+    }
+
+    // ── Retain ──────────────────────────────────────────────────────────
+
+    void retain(std::string_view topic, std::size_t count) {
+        typename Policy::UniqueLock lock(state_->mutex);
+        if (count == 0) {
+            state_->retention_config.erase(std::string(topic));
+            state_->retained_messages.erase(std::string(topic));
+        } else {
+            state_->retention_config[std::string(topic)] = count;
+        }
     }
 
     // ── Publish ──────────────────────────────────────────────────────────
@@ -107,14 +171,11 @@ public:
             (packed.emplace_back(args), ...);
         }
 
-        // Check if we're already dispatching on this thread (reentrant publish)
         const auto this_thread = std::this_thread::get_id();
         const bool reentrant = (state_->dispatching_thread.load() == this_thread);
 
-        // Snapshot matched entries by value — safe for concurrent unsubscribe
         std::vector<SubscriptionEntry> snapshot;
         {
-            // Only lock if not reentrant — avoid UB from re-acquiring shared_mutex
             std::optional<typename Policy::UniqueLock> lock;
             if (!reentrant) {
                 lock.emplace(state_->mutex);
@@ -133,6 +194,8 @@ public:
 
         auto topic_str = std::string(topic);
         for (const auto& entry : snapshot) {
+            if (entry.filter && !entry.filter(packed))
+                continue;
             try {
                 entry.callable(packed);
             } catch (...) {
@@ -143,9 +206,21 @@ public:
             }
         }
 
-        if (!reentrant) {
-            state_->dispatching_thread.store(std::thread::id{});
+        // Store retained message
+        {
+            std::optional<typename Policy::UniqueLock> lock;
+            if (!reentrant) lock.emplace(state_->mutex);
+            auto rit = state_->retention_config.find(topic_str);
+            if (rit != state_->retention_config.end()) {
+                auto& msgs = state_->retained_messages[topic_str];
+                msgs.push_back(RetainedMessage{packed});
+                while (msgs.size() > rit->second)
+                    msgs.erase(msgs.begin());
+            }
         }
+
+        if (!reentrant)
+            state_->dispatching_thread.store(std::thread::id{});
     }
 
     // ── Queue / Dispatch ─────────────────────────────────────────────────
@@ -164,7 +239,6 @@ public:
     }
 
     void dispatch() {
-        // Check if we're already dispatching on this thread (reentrant dispatch)
         const auto this_thread = std::this_thread::get_id();
         const bool reentrant = (state_->dispatching_thread.load() == this_thread);
 
@@ -182,8 +256,7 @@ public:
             std::vector<SubscriptionEntry> snapshot;
             {
                 std::optional<typename Policy::UniqueLock> lock;
-                if (!reentrant)
-                    lock.emplace(state_->mutex);
+                if (!reentrant) lock.emplace(state_->mutex);
                 state_->router.match(msg.topic, [&](TopicRouter::Id id) {
                     if (auto it = state_->entries.find(id); it != state_->entries.end())
                         snapshot.push_back(it->second);
@@ -196,6 +269,8 @@ public:
                 });
 
             for (const auto& entry : snapshot) {
+                if (entry.filter && !entry.filter(msg.packed))
+                    continue;
                 try {
                     entry.callable(msg.packed);
                 } catch (...) {
@@ -207,9 +282,8 @@ public:
             }
         }
 
-        if (!reentrant) {
+        if (!reentrant)
             state_->dispatching_thread.store(std::thread::id{});
-        }
     }
 
     // ── Error handler ────────────────────────────────────────────────────
@@ -239,10 +313,17 @@ public:
 private:
     using ErasedCallable = std::function<void(const std::vector<std::any>&)>;
 
+    using ErasedFilter = std::function<bool(const std::vector<std::any>&)>;
+
     struct SubscriptionEntry {
         ErasedCallable callable;
         int priority;
         std::string topic;
+        ErasedFilter filter;
+    };
+
+    struct RetainedMessage {
+        std::vector<std::any> packed;
     };
 
     struct QueuedMessage {
@@ -256,6 +337,8 @@ private:
         std::vector<QueuedMessage> message_queue;
         ErrorHandler error_handler;
         std::uint64_t next_id = 1;
+        std::unordered_map<std::string, std::size_t> retention_config;
+        std::unordered_map<std::string, std::vector<RetainedMessage>> retained_messages;
         mutable typename Policy::Mutex mutex;
         std::atomic<std::thread::id> dispatching_thread{};
     };
@@ -272,15 +355,11 @@ private:
         return Subscription(id, [weak, id]() noexcept {
             if (auto s = weak.lock()) {
                 try {
-                    // Check if cancel is called during dispatch (reentrant)
                     const auto this_thread = std::this_thread::get_id();
                     const bool reentrant =
                         (s->dispatching_thread.load() == this_thread);
-
                     std::optional<typename Policy::UniqueLock> lock;
-                    if (!reentrant)
-                        lock.emplace(s->mutex);
-
+                    if (!reentrant) lock.emplace(s->mutex);
                     s->router.remove(id);
                     s->entries.erase(id);
                 } catch (...) {}
@@ -309,6 +388,30 @@ private:
                                   std::index_sequence<Is...>) {
         using ArgsTuple = detail::callable_args_t<std::decay_t<F>>;
         f(std::any_cast<const std::remove_cvref_t<std::tuple_element_t<Is, ArgsTuple>>&>(
+            args[Is])...);
+    }
+
+    template <typename Pred>
+    static ErasedFilter make_erased_filter(Pred&& pred) {
+        constexpr auto arity = detail::callable_arity<Pred>;
+
+        if constexpr (arity == 0) {
+            return [p = std::forward<Pred>(pred)](const std::vector<std::any>&) -> bool {
+                return p();
+            };
+        } else {
+            return [p = std::forward<Pred>(pred)](const std::vector<std::any>& args) mutable -> bool {
+                if (args.size() < arity) return false;
+                return call_erased_filter_impl(p, args, std::make_index_sequence<arity>{});
+            };
+        }
+    }
+
+    template <typename Pred, std::size_t... Is>
+    static bool call_erased_filter_impl(Pred& p, const std::vector<std::any>& args,
+                                         std::index_sequence<Is...>) {
+        using ArgsTuple = detail::callable_args_t<std::decay_t<Pred>>;
+        return p(std::any_cast<const std::remove_cvref_t<std::tuple_element_t<Is, ArgsTuple>>&>(
             args[Is])...);
     }
 };
