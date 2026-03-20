@@ -65,7 +65,8 @@ int main() {
     std::cout << "Total messages: " << total_messages << "\n";
     std::cout << "Total value:    " << total_value << "\n";
     std::cout << "Time:           " << ms << " us\n";
-    std::cout << "Throughput:     " << (total_messages * 1000000LL / std::max(ms, 1LL)) << " msg/s\n";
+    auto safe_ms = ms > 0 ? ms : 1;
+    std::cout << "Throughput:     " << (total_messages.load() * 1000000 / safe_ms) << " msg/s\n";
 
     // Demonstrate reentrant safety: publish from within a subscriber callback
     std::cout << "\n=== Reentrancy test ===\n";
