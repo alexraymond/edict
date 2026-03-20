@@ -24,6 +24,11 @@ namespace edict {
 ///   (std::optional<T>, T) — old and new value
 ///   (T)                   — new value only
 ///   ()                    — just notified
+///
+/// Threading note: with MultiThreaded policy, concurrent set() calls on the
+/// same key may deliver observer notifications out of order (lock is released
+/// before callbacks to prevent deadlock). Use Channel<Args...> if strict
+/// ordering is required.
 template <typename Policy = SingleThreaded>
     requires ThreadingPolicy<Policy>
 class Blackboard {

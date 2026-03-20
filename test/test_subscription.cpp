@@ -106,6 +106,22 @@ TEST_CASE("SubscriptionGroup is move-only") {
     CHECK(a.size() == 0);
 }
 
+TEST_CASE("SubscriptionGroup move-assign cancels old subs") {
+    int old_calls = 0, new_calls = 0;
+    SubscriptionGroup a;
+    a += Subscription{1, [&old_calls]() noexcept { ++old_calls; }};
+    a += Subscription{2, [&old_calls]() noexcept { ++old_calls; }};
+
+    SubscriptionGroup b;
+    b += Subscription{3, [&new_calls]() noexcept { ++new_calls; }};
+
+    b = std::move(a);  // old b's sub (3) cancelled, a's subs transferred
+    CHECK(new_calls == 1);  // sub 3 cancelled
+    CHECK(old_calls == 0);  // subs 1,2 still alive in b
+    CHECK(b.size() == 2);
+    CHECK(a.size() == 0);
+}
+
 TEST_CASE("SubscriptionGroup with real Broadcaster") {
     edict::Broadcaster<> bus;
     int count = 0;

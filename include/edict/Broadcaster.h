@@ -22,8 +22,9 @@
 namespace edict {
 
 /// String-topic pub/sub engine with dynamic topic routing.
-/// Uses std::any for type erasure on the convenience path.
-/// For zero-cost typed dispatch, use Channel<Args...> instead.
+/// Uses std::any for type erasure on the convenience path. Each publish()
+/// allocates a vector<any> and copies the subscriber snapshot for reentrancy
+/// safety. For zero-cost typed dispatch on hot paths, use Channel<Args...>.
 /// Thread-safety controlled by Policy template parameter.
 template <typename Policy = SingleThreaded>
     requires ThreadingPolicy<Policy>

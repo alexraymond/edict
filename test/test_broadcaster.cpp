@@ -172,6 +172,29 @@ TEST_CASE("Broadcaster: active_topics excludes patterns and predicates") {
     CHECK(topics[0] == "exact/topic");
 }
 
+TEST_CASE("Broadcaster: publish to invalid topic is silent no-op") {
+    edict::Broadcaster<> b;
+    int count = 0;
+    auto sub = b.subscribe("valid", [&]() { ++count; });
+    b.publish("valid");
+    CHECK(count == 1);
+    b.publish("");           // invalid — no-op
+    b.publish("/leading");   // invalid — no-op
+    b.publish("a//b");       // invalid — no-op
+    CHECK(count == 1);
+}
+
+TEST_CASE("Broadcaster: has_subscribers includes pattern and predicate matches") {
+    edict::Broadcaster<> b;
+    auto s1 = b.subscribe_pattern("sensor/*", []() {});
+    CHECK(b.has_subscribers("sensor/temp"));
+    auto s2 = b.subscribe(
+        [](std::string_view t) { return t == "magic"; },
+        []() {});
+    CHECK(b.has_subscribers("magic"));
+    CHECK_FALSE(b.has_subscribers("nonexistent/deep/path"));
+}
+
 TEST_CASE("Broadcaster: independent topics") {
     edict::Broadcaster<> b;
     int a = 0, bc = 0;

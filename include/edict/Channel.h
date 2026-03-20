@@ -13,14 +13,13 @@
 
 namespace edict {
 
-/**
- * Typed pub/sub channel with zero type erasure on the publish path.
- * Subscribers stored in priority order. Publish dispatches via snapshot
- * for reentrancy safety. Any callable satisfying Subscribable<Args...>
- * works — free functions, lambdas, member functions, functors.
- * Partial argument matching: zero-arg watchers and partial subscribers
- * are supported alongside full-arg handlers.
- */
+/// Typed pub/sub channel with zero type erasure on the publish path.
+/// Subscribers stored in priority order. Publish dispatches via snapshot
+/// for reentrancy safety. Any callable satisfying Subscribable<Args...>
+/// works — free functions, lambdas, member functions, functors.
+/// Partial argument matching: zero-arg watchers and partial subscribers
+/// are supported alongside full-arg handlers.
+/// Not movable — subscription removers capture `this`.
 template <typename... Args>
 class Channel {
 public:
