@@ -99,6 +99,11 @@ public:
         state_->store.erase(std::string(key));
     }
 
+    /// Set callback for observer exceptions (propagated to internal broadcaster).
+    void set_error_handler(ErrorHandler handler) {
+        state_->broadcaster.set_error_handler(std::move(handler));
+    }
+
     /// List all keys.
     [[nodiscard]] std::vector<std::string> keys() const {
         typename Policy::SharedLock lock(state_->mutex);

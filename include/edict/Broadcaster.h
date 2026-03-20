@@ -9,14 +9,12 @@
 
 #include <algorithm>
 #include <any>
-#include <atomic>
 #include <cstdint>
 #include <deque>
 #include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -218,20 +216,17 @@ private:
         std::unordered_map<std::string, std::size_t> retention_config;
         std::unordered_map<std::string, std::deque<std::vector<std::any>>> retained_messages;
         mutable typename Policy::Mutex mutex;
-        // Tracks the thread currently dispatching, for safe reentrant cancel().
-        std::atomic<std::thread::id> dispatching_thread{};
     };
 
     std::shared_ptr<State> state_;
 
     // ── Core helpers ─────────────────────────────────────────────────────
 
-    // Collect matching entries into a priority-sorted snapshot.
-    // Lock is acquired and released within this call.
+    // Collect matching entries into a priority-sorted snapshot (read-only).
     std::vector<SubscriptionEntry> collect_snapshot(std::string_view topic) {
         std::vector<SubscriptionEntry> snapshot;
         {
-            typename Policy::UniqueLock lock(state_->mutex);
+            typename Policy::SharedLock lock(state_->mutex);
             state_->router.match(topic, [&](TopicRouter::Id id) {
                 if (auto it = state_->entries.find(id); it != state_->entries.end())
                     snapshot.push_back(it->second);
@@ -245,18 +240,9 @@ private:
     }
 
     // Dispatch to a snapshot of entries. No lock held — callbacks may re-enter.
-    // Sets dispatching_thread for the duration so that cancel() from within
-    // a callback can skip lock acquisition (avoiding deadlock on non-recursive mutex).
     void dispatch_to(const std::vector<SubscriptionEntry>& snapshot,
                      const std::vector<std::any>& packed,
                      const std::string& topic_str) {
-        auto tid = std::this_thread::get_id();
-        bool was_dispatching =
-            (state_->dispatching_thread.load(std::memory_order_acquire) == tid);
-
-        if (!was_dispatching)
-            state_->dispatching_thread.store(tid, std::memory_order_release);
-
         for (const auto& entry : snapshot) {
             if (entry.filter && !entry.filter(packed))
                 continue;
@@ -269,9 +255,6 @@ private:
                 } catch (...) {}
             }
         }
-
-        if (!was_dispatching)
-            state_->dispatching_thread.store(std::thread::id{}, std::memory_order_release);
     }
 
     void store_retained(const std::string& topic_str,
