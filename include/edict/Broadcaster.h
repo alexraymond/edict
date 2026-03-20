@@ -159,7 +159,19 @@ public:
     template <typename... Args>
     void publish(std::string_view topic, const Args&... args) {
         if (!detail::TopicTree::validate_publish_topic(topic))
-            return; // invalid topic — silently no-op (validated at subscribe time instead)
+            return;
+
+        // Collect snapshot first — defer arg packing until we know someone is listening
+        auto snap = collect_snapshot(topic);
+
+        // Fast path: skip packing + string alloc if no subscribers and no retention
+        bool has_retention;
+        {
+            typename Policy::SharedLock lock(state_->mutex);
+            has_retention = state_->retention_config.contains(topic);
+        }
+        if (snap.entries.empty() && !has_retention)
+            return;
 
         std::vector<std::any> packed;
         if constexpr (sizeof...(Args) > 0) {
@@ -168,15 +180,7 @@ public:
         }
 
         auto topic_str = std::string(topic);
-
-        // Step 1: collect snapshot + store retained under lock
-        auto snap = collect_snapshot(topic);
-        // Note: snapshot and retention are not atomically consistent — a concurrent
-        // retain(topic, 0) between these calls may clear retention before our store.
-        // This is acceptable: the message was already dispatched to current subscribers.
         store_retained(topic_str, packed);
-
-        // Step 2: dispatch outside lock (callbacks may re-enter)
         dispatch_to(snap.entries, packed, topic_str, snap.error_handler);
     }
 

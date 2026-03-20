@@ -46,11 +46,9 @@ public:
         using V = std::decay_t<T>;
         std::optional<V> old_val;
         V new_copy(std::forward<T>(value));
-        auto key_str = std::string(key);
-
         {
             typename Policy::UniqueLock lock(state_->mutex);
-            auto it = state_->store.find(key_str);
+            auto it = state_->store.find(key); // transparent lookup — no string alloc
             if (it != state_->store.end()) {
                 try {
                     old_val = std::any_cast<V>(it->second);
@@ -61,9 +59,10 @@ public:
                 }
                 it->second = new_copy;
             } else {
-                state_->store.emplace(key_str, new_copy);
+                state_->store.emplace(std::string(key), new_copy);
             }
         }
+        auto key_str = std::string(key); // materialized only for publish
         // Lock released before notifying observers (prevents deadlock)
 
         state_->broadcaster.publish(key_str, old_val, new_copy);

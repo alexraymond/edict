@@ -191,3 +191,19 @@ TEST_CASE("Blackboard: erase does not fire typed observers") {
     bb.erase("key");
     CHECK(typed_count == 1); // NOT fired — erase publishes zero args, typed observer needs 2
 }
+
+TEST_CASE("Blackboard: set_error_handler catches observer exceptions") {
+    edict::Blackboard<> bb;
+    std::string caught_key;
+
+    bb.set_error_handler([&](std::exception_ptr ep, std::string_view key) {
+        caught_key = std::string(key);
+    });
+
+    auto obs = bb.observe<int>("score", [](std::optional<int>, int) {
+        throw std::runtime_error("observer failed");
+    });
+
+    bb.set("score", 42);
+    CHECK(caught_key == "score");
+}

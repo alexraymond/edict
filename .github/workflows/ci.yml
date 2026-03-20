@@ -63,3 +63,46 @@ jobs:
       - name: Test (Windows)
         if: runner.os == 'Windows'
         run: ctest --test-dir build --output-on-failure -C Release
+
+  sanitizers:
+    runs-on: ubuntu-24.04
+    name: sanitizers (TSan + ASan)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure with TSan
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        run: |
+          cmake -S . -B build-tsan \
+            -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_C_COMPILER="$CC" \
+            -DCMAKE_CXX_FLAGS="-fsanitize=thread -g" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread" \
+            -DEDICT_BUILD_TESTS=ON
+
+      - name: Build TSan
+        run: cmake --build build-tsan
+
+      - name: Test TSan
+        run: ctest --test-dir build-tsan --output-on-failure
+
+      - name: Configure with ASan + UBSan
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        run: |
+          cmake -S . -B build-asan \
+            -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_C_COMPILER="$CC" \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -g -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
+            -DEDICT_BUILD_TESTS=ON
+
+      - name: Build ASan
+        run: cmake --build build-asan
+
+      - name: Test ASan
+        run: ctest --test-dir build-asan --output-on-failure

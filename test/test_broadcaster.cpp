@@ -184,6 +184,19 @@ TEST_CASE("Broadcaster: publish to invalid topic is silent no-op") {
     CHECK(count == 1);
 }
 
+TEST_CASE("Broadcaster: subscriber_count includes patterns and predicates") {
+    edict::Broadcaster<> b;
+    auto s1 = b.subscribe("sensor/temp", []() {});
+    auto s2 = b.subscribe_pattern("sensor/*", []() {});
+    auto s3 = b.subscribe(
+        [](std::string_view t) { return t.starts_with("sensor/"); },
+        []() {});
+    // All three match "sensor/temp"
+    CHECK(b.subscriber_count("sensor/temp") == 3);
+    // Only wildcard + predicate match "sensor/humidity"
+    CHECK(b.subscriber_count("sensor/humidity") == 2);
+}
+
 TEST_CASE("Broadcaster: has_subscribers includes pattern and predicate matches") {
     edict::Broadcaster<> b;
     auto s1 = b.subscribe_pattern("sensor/*", []() {});

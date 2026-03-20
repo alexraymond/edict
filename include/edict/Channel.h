@@ -19,6 +19,9 @@ namespace edict {
 /// works — free functions, lambdas, member functions, functors.
 /// Partial argument matching: zero-arg watchers and partial subscribers
 /// are supported alongside full-arg handlers.
+///
+/// NOT thread-safe. All subscribe/publish/cancel calls must happen on the
+/// same thread. For thread-safe pub/sub, use Broadcaster<MultiThreaded>.
 /// Not movable — subscription removers capture `this`.
 template <typename... Args>
 class Channel {
