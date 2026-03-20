@@ -20,30 +20,24 @@ Build your first Edict program in under 5 minutes.
 
 ## Step 1: Include the header
 
-You only need one header for most use cases:
-
 ```cpp
-#include <edict/Channel.h>    // typed pub/sub
-// or
-#include <edict/Broadcaster.h> // string-topic pub/sub
-// or
-#include <edict/edict.h>       // everything
+#include <edict/Broadcaster.h>
 ```
 
-## Step 2: Create a channel
+That's the only header you need for pub/sub. (`edict/edict.h` includes everything if you prefer.)
 
-A `Channel<Args...>` declares what type of data flows through it:
+## Step 2: Create a Broadcaster
 
 ```cpp
-edict::Channel<std::string> greet;
+edict::Broadcaster<> bus;
 ```
 
-This channel carries `std::string` messages. Publishers send strings, subscribers receive strings.
+A Broadcaster routes messages by topic string. The `<>` means single-threaded (zero overhead). For multi-threaded use, write `edict::SharedBroadcaster`.
 
 ## Step 3: Subscribe
 
 ```cpp
-auto sub = greet.subscribe([](const std::string& name) {
+auto sub = bus.subscribe("greet", [](const std::string& name) {
     std::cout << "Hello, " << name << "!\n";
 });
 ```
@@ -53,15 +47,15 @@ auto sub = greet.subscribe([](const std::string& name) {
 {: .warning }
 > `subscribe()` is `[[nodiscard]]`. Ignoring the return value unsubscribes immediately.
 > ```cpp
-> greet.subscribe(handler);  // BUG: subscription dies instantly
-> auto sub = greet.subscribe(handler);  // correct
+> bus.subscribe("greet", handler);  // BUG: subscription dies instantly
+> auto sub = bus.subscribe("greet", handler);  // correct
 > ```
 
 ## Step 4: Publish
 
 ```cpp
-greet.publish("World");   // prints: Hello, World!
-greet.publish("Edict");   // prints: Hello, Edict!
+bus.publish("greet", std::string("World"));   // prints: Hello, World!
+bus.publish("greet", std::string("Edict"));   // prints: Hello, Edict!
 ```
 
 Every subscriber fires synchronously, in priority order, inside the `publish()` call.
@@ -72,10 +66,10 @@ Just let the subscription go out of scope:
 
 ```cpp
 {
-    auto sub = greet.subscribe(handler);
-    greet.publish("yes");   // handler fires
+    auto sub = bus.subscribe("greet", handler);
+    bus.publish("greet", std::string("yes"));   // handler fires
 }
-greet.publish("no");        // handler does NOT fire — sub is dead
+bus.publish("greet", std::string("no"));        // handler does NOT fire — sub is dead
 ```
 
 Or cancel explicitly:
@@ -89,7 +83,7 @@ sub.cancel();
 ## Complete example
 
 ```cpp
-#include <edict/Channel.h>
+#include <edict/Broadcaster.h>
 #include <iostream>
 #include <string>
 
@@ -98,29 +92,29 @@ void on_greet(const std::string& name) {
 }
 
 int main() {
-    edict::Channel<std::string> greet;
+    edict::Broadcaster<> bus;
 
     // Free function
-    auto s1 = greet.subscribe(on_greet);
+    auto s1 = bus.subscribe("greet", on_greet);
 
     // Lambda
-    auto s2 = greet.subscribe([](const std::string& name) {
+    auto s2 = bus.subscribe("greet", [](const std::string& name) {
         std::cout << "  (whispers) hey " << name << "...\n";
     });
 
     // Zero-arg watcher — doesn't need the data, just wants notification
-    auto s3 = greet.subscribe([]() {
+    auto s3 = bus.subscribe("greet", []() {
         std::cout << "  [someone was greeted]\n";
     });
 
-    greet.publish("World");
+    bus.publish("greet", std::string("World"));
     // Hello, World!
     //   (whispers) hey World...
     //   [someone was greeted]
 
     s2.cancel();  // unsubscribe the whisperer
 
-    greet.publish("Again");
+    bus.publish("greet", std::string("Again"));
     // Hello, Again!
     //   [someone was greeted]
 }
@@ -128,8 +122,8 @@ int main() {
 
 ## What's next?
 
-- [Typed Channels](channels) — the zero-cost path
-- [Broadcaster](broadcaster) — string topics with wildcards
+- [Broadcaster](broadcaster) — wildcards, predicates, filters, queue/dispatch
 - [Blackboard](blackboard) — typed state store
 - [Threading](threading) — multi-threaded usage
 - [How-To Recipes](how-to) — common patterns
+- [Typed Channels](channels) — advanced: zero-cost typed dispatch for hot paths

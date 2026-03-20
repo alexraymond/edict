@@ -1,7 +1,7 @@
 ---
 layout: default
-title: Typed Channels
-nav_order: 3
+title: Typed Channels (Advanced)
+nav_order: 8
 ---
 
 # Typed Channels
