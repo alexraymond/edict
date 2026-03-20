@@ -8,6 +8,11 @@
 
 namespace edict {
 
+/**
+ * Move-only RAII subscription handle. Automatically unsubscribes on
+ * destruction. Call cancel() to unsubscribe early. Safe to outlive
+ * the Channel/Broadcaster that created it (no-op on cancel).
+ */
 class Subscription {
 public:
     using Id = std::uint64_t;
@@ -63,6 +68,10 @@ static_assert(std::is_move_constructible_v<Subscription>);
 static_assert(std::is_move_assignable_v<Subscription>);
 
 
+/**
+ * Container for multiple Subscriptions. All are cancelled when the
+ * group is destroyed or cancel_all() is called.
+ */
 class SubscriptionGroup {
 public:
     SubscriptionGroup() = default;

@@ -22,6 +22,10 @@
 
 namespace edict {
 
+/// String-topic pub/sub engine with dynamic topic routing.
+/// Uses std::any for type erasure on the convenience path.
+/// For zero-cost typed dispatch, use Channel<Args...> instead.
+/// Thread-safety controlled by Policy template parameter.
 template <typename Policy = SingleThreaded>
     requires ThreadingPolicy<Policy>
 class Broadcaster {
@@ -35,6 +39,7 @@ public:
 
     // ── Subscribe: exact topic + callable ────────────────────────────────
 
+    /// Subscribe to an exact topic. Partial arg matching supported.
     template <typename F>
         requires detail::has_callable_traits_v<F>
     [[nodiscard]] Subscription subscribe(std::string_view topic, F&& handler,
@@ -55,6 +60,7 @@ public:
 
     // ── Subscribe: exact topic + member function ─────────────────────────
 
+    /// Subscribe a member function to an exact topic.
     template <typename T, typename MF>
     [[nodiscard]] Subscription subscribe(std::string_view topic, T* obj, MF method,
                                           SubscribeOptions opts = {}) {
@@ -63,6 +69,7 @@ public:
 
     // ── Subscribe: wildcard pattern ──────────────────────────────────────
 
+    /// Subscribe to a wildcard pattern (* and **).
     template <typename F>
         requires detail::has_callable_traits_v<F>
     [[nodiscard]] Subscription subscribe_pattern(std::string_view pattern, F&& handler,
@@ -82,6 +89,7 @@ public:
 
     // ── Subscribe: predicate-based topic matching ────────────────────────
 
+    /// Subscribe with a custom topic predicate.
     template <typename Pred, typename F>
         requires std::invocable<Pred, std::string_view> && detail::has_callable_traits_v<F>
     [[nodiscard]] Subscription subscribe(Pred&& predicate, F&& handler,
@@ -101,6 +109,7 @@ public:
 
     // ── Subscribe: exact topic + callable + filter ────────────────────────
 
+    /// Subscribe with a data filter. Handler only called when filter passes.
     template <typename F, typename Pred>
         requires detail::has_callable_traits_v<F>
     [[nodiscard]] Subscription subscribe(std::string_view topic, F&& handler,
@@ -123,6 +132,7 @@ public:
 
     // ── Retain ──────────────────────────────────────────────────────────
 
+    /// Enable message retention. Last count messages stored per topic. Pass 0 to disable.
     void retain(std::string_view topic, std::size_t count) {
         typename Policy::UniqueLock lock(state_->mutex);
         if (count == 0) {
@@ -135,6 +145,7 @@ public:
 
     // ── Publish ──────────────────────────────────────────────────────────
 
+    /// Publish to all matching subscribers. Reentrant-safe.
     template <typename... Args>
     void publish(std::string_view topic, const Args&... args) {
         std::vector<std::any> packed;
@@ -197,6 +208,7 @@ public:
 
     // ── Queue / Dispatch ─────────────────────────────────────────────────
 
+    /// Enqueue a message for deferred delivery.
     template <typename... Args>
     void queue(std::string_view topic, Args&&... args) {
         std::vector<std::any> packed;
@@ -210,6 +222,7 @@ public:
             QueuedMessage{std::string(topic), std::move(packed)});
     }
 
+    /// Deliver all queued messages in FIFO order.
     void dispatch() {
         const auto this_thread = std::this_thread::get_id();
         const bool reentrant = (state_->dispatching_thread.load() == this_thread);
@@ -260,6 +273,7 @@ public:
 
     // ── Error handler ────────────────────────────────────────────────────
 
+    /// Set callback for subscriber exceptions.
     void set_error_handler(ErrorHandler handler) {
         typename Policy::UniqueLock lock(state_->mutex);
         state_->error_handler = std::move(handler);
@@ -267,11 +281,13 @@ public:
 
     // ── Introspection ────────────────────────────────────────────────────
 
+    /// Number of subscribers matching this exact topic.
     [[nodiscard]] std::size_t subscriber_count(std::string_view topic) const {
         typename Policy::UniqueLock lock(state_->mutex);
         return state_->router.subscriber_count(topic);
     }
 
+    /// True if any subscriber would receive a publish on this topic.
     [[nodiscard]] bool has_subscribers(std::string_view topic) const {
         typename Policy::UniqueLock lock(state_->mutex);
         return state_->router.has_subscribers(topic);

@@ -13,11 +13,21 @@
 
 namespace edict {
 
+/**
+ * Typed pub/sub channel with zero type erasure on the publish path.
+ * Subscribers stored in priority order. Publish dispatches via snapshot
+ * for reentrancy safety. Any callable satisfying Subscribable<Args...>
+ * works — free functions, lambdas, member functions, functors.
+ * Partial argument matching: zero-arg watchers and partial subscribers
+ * are supported alongside full-arg handlers.
+ */
 template <typename... Args>
 class Channel {
 public:
     explicit Channel(std::string topic = {}) : topic_(std::move(topic)) {}
 
+    /// Subscribe a callable to this channel.
+    /// Returns a move-only Subscription that unsubscribes on destruction.
     template <typename F>
         requires detail::Subscribable<F, Args...>
     [[nodiscard]] Subscription subscribe(F&& handler, SubscribeOptions opts = {}) {
@@ -52,11 +62,14 @@ public:
         return Subscription(id, std::move(remover));
     }
 
+    /// Subscribe a member function. Binds obj + method into a callable.
     template <typename T, typename MF>
     [[nodiscard]] Subscription subscribe(T* obj, MF method, SubscribeOptions opts = {}) {
         return subscribe(detail::bind_member(obj, method), opts);
     }
 
+    /// Publish to all subscribers. Exception-safe: if a subscriber throws,
+    /// remaining subscribers still fire. Reentrant-safe via snapshot dispatch.
     void publish(const Args&... args) const {
         auto snapshot = entries_;
         for (const auto& entry : snapshot) {

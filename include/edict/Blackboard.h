@@ -17,6 +17,12 @@
 
 namespace edict {
 
+/// Typed key-value state store with change observation.
+/// Uses an internal Broadcaster for change notifications.
+/// Observers support partial arg matching:
+///   (std::optional<T>, T) — old and new value
+///   (T)                   — new value only
+///   ()                    — just notified
 template <typename Policy = SingleThreaded>
     requires ThreadingPolicy<Policy>
 class Blackboard {
@@ -28,7 +34,7 @@ public:
     Blackboard(Blackboard&&) = default;
     Blackboard& operator=(Blackboard&&) = default;
 
-    /// Store a value under a key. Fires observers with (old, new).
+    /// Store a value under a key. Fires observers with (old, new). Lock released before callbacks.
     template <typename T>
     void set(std::string_view key, T&& value) {
         using V = std::decay_t<T>;
@@ -55,7 +61,7 @@ public:
         state_->broadcaster.publish(std::string(key), old_val, new_copy);
     }
 
-    /// Read a value — returns expected<T, Error>.
+    /// Read a value. Returns std::expected<T, Error>.
     template <typename T>
     [[nodiscard]] std::expected<T, Error> get(std::string_view key) const {
         typename Policy::SharedLock lock(state_->mutex);
@@ -70,10 +76,7 @@ public:
         }
     }
 
-    /// Observe changes to a key. Handler can take:
-    ///   (std::optional<T>, T) — old and new value
-    ///   (T)                   — new value only
-    ///   ()                    — just notified
+    /// Observe changes to a key. T must match the type passed to set().
     template <typename T, typename F>
     [[nodiscard]] Subscription observe(std::string_view key, F&& handler,
                                         SubscribeOptions opts = {}) {

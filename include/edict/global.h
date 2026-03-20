@@ -1,3 +1,7 @@
+/// @file
+/// Opt-in global convenience API. Include this header for free functions
+/// that operate on default global Broadcaster and Blackboard instances.
+/// Call edict::reset() between tests to clear global state.
 #pragma once
 
 #include <edict/edict.h>

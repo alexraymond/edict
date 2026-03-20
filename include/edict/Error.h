@@ -33,6 +33,7 @@ struct SubscribeOptions {
 };
 
 /// Filter wrapper — wraps a predicate over published args.
+/// Usage: `edict::filter([](int v) { return v > 0; })`
 template <typename Pred>
 struct Filter {
     Pred predicate;
