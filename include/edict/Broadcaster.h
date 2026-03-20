@@ -10,6 +10,7 @@
 #include <any>
 #include <atomic>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -48,20 +49,7 @@ public:
                 std::move(erased), opts.priority, std::string(topic), {}});
         }
 
-        if (opts.replay) {
-            std::vector<RetainedMessage> to_replay;
-            {
-                typename Policy::UniqueLock lock(state_->mutex);
-                auto rit = state_->retained_messages.find(std::string(topic));
-                if (rit != state_->retained_messages.end())
-                    to_replay = rit->second;
-            }
-            auto& entry_ref = state_->entries.at(id);
-            for (const auto& msg : to_replay) {
-                try { entry_ref.callable(msg.packed); } catch (...) {}
-            }
-        }
-
+        replay_retained(id, topic, erased, opts);
         return make_subscription(id);
     }
 
@@ -129,23 +117,7 @@ public:
                 std::move(erased_filter)});
         }
 
-        if (opts.replay) {
-            std::vector<RetainedMessage> to_replay;
-            {
-                typename Policy::UniqueLock lock(state_->mutex);
-                auto rit = state_->retained_messages.find(std::string(topic));
-                if (rit != state_->retained_messages.end())
-                    to_replay = rit->second;
-            }
-            auto& entry_ref = state_->entries.at(id);
-            for (const auto& msg : to_replay) {
-                try {
-                    if (!entry_ref.filter || entry_ref.filter(msg.packed))
-                        entry_ref.callable(msg.packed);
-                } catch (...) {}
-            }
-        }
-
+        replay_retained(id, topic, erased, opts);
         return make_subscription(id);
     }
 
@@ -215,7 +187,7 @@ public:
                 auto& msgs = state_->retained_messages[topic_str];
                 msgs.push_back(RetainedMessage{packed});
                 while (msgs.size() > rit->second)
-                    msgs.erase(msgs.begin());
+                    msgs.pop_front();
             }
         }
 
@@ -305,6 +277,8 @@ public:
         return state_->router.has_subscribers(topic);
     }
 
+    /// Returns topics with exact-match subscribers. Does not include
+    /// wildcard patterns or predicate-based subscriptions.
     [[nodiscard]] std::vector<std::string> active_topics() const {
         typename Policy::UniqueLock lock(state_->mutex);
         return state_->router.active_topics();
@@ -338,12 +312,37 @@ private:
         ErrorHandler error_handler;
         std::uint64_t next_id = 1;
         std::unordered_map<std::string, std::size_t> retention_config;
-        std::unordered_map<std::string, std::vector<RetainedMessage>> retained_messages;
+        std::unordered_map<std::string, std::deque<RetainedMessage>> retained_messages;
         mutable typename Policy::Mutex mutex;
         std::atomic<std::thread::id> dispatching_thread{};
     };
 
     std::shared_ptr<State> state_;
+
+    // Replay retained messages to a newly subscribed callable.
+    // Copies the callable by value to avoid dangling references (Sutter fix #1).
+    void replay_retained(TopicRouter::Id id, std::string_view topic,
+                         const ErasedCallable& callable, const SubscribeOptions& opts) {
+        if (!opts.replay) return;
+
+        std::deque<RetainedMessage> to_replay;
+        ErasedFilter entry_filter;
+        {
+            typename Policy::UniqueLock lock(state_->mutex);
+            auto rit = state_->retained_messages.find(std::string(topic));
+            if (rit != state_->retained_messages.end())
+                to_replay = rit->second;
+            if (auto eit = state_->entries.find(id); eit != state_->entries.end())
+                entry_filter = eit->second.filter;
+        }
+        // Dispatch outside lock, using copies — no dangling refs
+        for (const auto& msg : to_replay) {
+            try {
+                if (!entry_filter || entry_filter(msg.packed))
+                    callable(msg.packed);
+            } catch (...) {}
+        }
+    }
 
     TopicRouter::Id allocate_id() {
         typename Policy::UniqueLock lock(state_->mutex);
