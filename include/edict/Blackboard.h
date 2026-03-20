@@ -41,25 +41,23 @@ public:
         using V = std::decay_t<T>;
         std::optional<V> old_val;
         V new_copy(std::forward<T>(value));
+        auto key_str = std::string(key);
 
         {
             typename Policy::UniqueLock lock(state_->mutex);
-            auto it = state_->store.find(std::string(key));
+            auto it = state_->store.find(key_str);
             if (it != state_->store.end()) {
                 try {
                     old_val = std::any_cast<V>(it->second);
-                } catch (const std::bad_any_cast&) {
-                    // Type changed — old value is effectively absent
-                }
+                } catch (const std::bad_any_cast&) {}
                 it->second = new_copy;
             } else {
-                state_->store.emplace(std::string(key), new_copy);
+                state_->store.emplace(key_str, new_copy);
             }
         }
-        // Lock released before notifying observers (Sutter's rule — prevents
-        // deadlock if observer calls set())
+        // Lock released before notifying observers (prevents deadlock)
 
-        state_->broadcaster.publish(std::string(key), old_val, new_copy);
+        state_->broadcaster.publish(key_str, old_val, new_copy);
     }
 
     /// Read a value. Returns std::expected<T, Error>.
@@ -78,9 +76,9 @@ public:
     }
 
     /// Observe changes to a key. T must match the type passed to set().
-    /// Handler can take (optional<T>, T), (optional<T>), or () for partial matching.
+    /// Handler can take (optional<T>, T), (optional<T>), or () via partial matching.
     template <typename T, typename F>
-        requires detail::has_callable_traits_v<F>
+        requires detail::Subscribable<F, std::optional<T>, T>
     [[nodiscard]] Subscription observe(std::string_view key, F&& handler,
                                         SubscribeOptions opts = {}) {
         return state_->broadcaster.subscribe(std::string(key),

@@ -6,4 +6,3 @@
 #include <edict/Error.h>
 #include <edict/Policy.h>
 #include <edict/Subscription.h>
-#include <edict/TopicRouter.h>

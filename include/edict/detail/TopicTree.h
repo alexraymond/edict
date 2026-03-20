@@ -1,7 +1,7 @@
 #pragma once
 
-#include <cassert>
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -36,7 +36,8 @@ public:
     }
 
     void insert(std::string_view pattern, Id id) {
-        assert(validate_topic(pattern));
+        if (!validate_topic(pattern))
+            throw std::invalid_argument("edict: invalid topic pattern");
         auto* node = &root_;
         for_each_segment(pattern, [&](std::string_view seg) {
             node = &node->children[std::string(seg)];

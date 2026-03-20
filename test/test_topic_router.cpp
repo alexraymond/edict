@@ -1,9 +1,9 @@
 #include <doctest/doctest.h>
-#include <edict/TopicRouter.h>
+#include <edict/detail/TopicRouter.h>
 #include <algorithm>
 #include <vector>
 
-using edict::TopicRouter;
+using edict::detail::TopicRouter;
 
 std::vector<TopicRouter::Id> collect_matches(const TopicRouter& r, std::string_view topic) {
     std::vector<TopicRouter::Id> ids;

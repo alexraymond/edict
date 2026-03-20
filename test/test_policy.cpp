@@ -33,14 +33,12 @@ TEST_CASE("ThreadingPolicy concept") {
 }
 
 TEST_CASE("Error enum values are distinct") {
-    CHECK(edict::Error::InvalidTopic != edict::Error::TypeMismatch);
-    CHECK(edict::Error::TypeMismatch != edict::Error::KeyNotFound);
+    CHECK(edict::Error::InvalidTopic != edict::Error::KeyNotFound);
     CHECK(edict::Error::KeyNotFound != edict::Error::BadCast);
 }
 
 TEST_CASE("error_message covers all values") {
     CHECK(edict::error_message(edict::Error::InvalidTopic).size() > 0);
-    CHECK(edict::error_message(edict::Error::TypeMismatch).size() > 0);
     CHECK(edict::error_message(edict::Error::KeyNotFound).size() > 0);
     CHECK(edict::error_message(edict::Error::BadCast).size() > 0);
 }

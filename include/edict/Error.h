@@ -10,7 +10,6 @@ namespace edict {
 
 enum class Error : std::uint8_t {
     InvalidTopic,
-    TypeMismatch,
     KeyNotFound,
     BadCast,
 };
@@ -18,7 +17,6 @@ enum class Error : std::uint8_t {
 [[nodiscard]] constexpr std::string_view error_message(Error e) noexcept {
     switch (e) {
         case Error::InvalidTopic: return "invalid topic: no leading/trailing '/', no empty segments";
-        case Error::TypeMismatch: return "type mismatch between publisher and subscriber";
         case Error::KeyNotFound:  return "key not found in blackboard";
         case Error::BadCast:      return "requested type does not match stored type";
     }

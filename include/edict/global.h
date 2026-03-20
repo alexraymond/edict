@@ -1,7 +1,3 @@
-/// @file
-/// Opt-in global convenience API. Include this header for free functions
-/// that operate on default global Broadcaster and Blackboard instances.
-/// Call edict::reset() between tests to clear global state.
 #pragma once
 
 #include <edict/edict.h>
@@ -19,7 +15,8 @@ inline SharedBlackboard& global_blackboard() {
 }
 } // namespace detail
 
-/// Reset global state (for testing).
+/// Reset global state. NOT thread-safe — call only from single-threaded
+/// test setup/teardown with no concurrent activity.
 inline void reset() {
     detail::global_broadcaster() = SharedBroadcaster{};
     detail::global_blackboard() = SharedBlackboard{};
@@ -65,9 +62,10 @@ template <typename T>
 }
 
 template <typename T, typename F>
-[[nodiscard]] Subscription observe(std::string_view key, F&& handler) {
+[[nodiscard]] Subscription observe(std::string_view key, F&& handler,
+                                    SubscribeOptions opts = {}) {
     return detail::global_blackboard().template observe<T>(key,
-        std::forward<F>(handler));
+        std::forward<F>(handler), opts);
 }
 
 inline bool has(std::string_view key) { return detail::global_blackboard().has(key); }

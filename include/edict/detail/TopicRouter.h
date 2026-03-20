@@ -11,7 +11,7 @@
 #include <variant>
 #include <vector>
 
-namespace edict {
+namespace edict::detail {
 
 class TopicRouter {
 public:
@@ -93,4 +93,4 @@ private:
     std::unordered_map<Id, std::variant<ExactReg, PatternReg, PredicateReg>> reg_;
 };
 
-} // namespace edict
+} // namespace edict::detail

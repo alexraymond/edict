@@ -3,7 +3,7 @@
 #include <edict/Error.h>
 #include <edict/Policy.h>
 #include <edict/Subscription.h>
-#include <edict/TopicRouter.h>
+#include <edict/detail/TopicRouter.h>
 #include <edict/detail/TopicTree.h>
 #include <edict/detail/Traits.h>
 
@@ -129,12 +129,11 @@ public:
             (packed.emplace_back(args), ...);
         }
 
-        auto topic_str = std::string(topic);
-
         // Step 1: collect snapshot under lock, then release
         auto snapshot = collect_snapshot(topic);
 
         // Step 2: dispatch outside lock (callbacks may re-enter)
+        auto topic_str = std::string(topic); // deferred until needed for error reporting
         dispatch_to(snapshot, packed, topic_str);
 
         // Step 3: store retained under lock
@@ -164,6 +163,7 @@ public:
         for (auto& msg : pending) {
             auto snapshot = collect_snapshot(msg.topic);
             dispatch_to(snapshot, msg.packed, msg.topic);
+            store_retained(msg.topic, msg.packed);
         }
     }
 
@@ -208,8 +208,8 @@ private:
     };
 
     struct State {
-        TopicRouter router;
-        std::unordered_map<TopicRouter::Id, SubscriptionEntry> entries;
+        detail::TopicRouter router;
+        std::unordered_map<detail::TopicRouter::Id, SubscriptionEntry> entries;
         std::vector<QueuedMessage> message_queue;
         ErrorHandler error_handler;
         std::uint64_t next_id = 1;
@@ -227,7 +227,7 @@ private:
         std::vector<SubscriptionEntry> snapshot;
         {
             typename Policy::SharedLock lock(state_->mutex);
-            state_->router.match(topic, [&](TopicRouter::Id id) {
+            state_->router.match(topic, [&](detail::TopicRouter::Id id) {
                 if (auto it = state_->entries.find(id); it != state_->entries.end())
                     snapshot.push_back(it->second);
             });
@@ -277,7 +277,7 @@ private:
 
         std::deque<std::vector<std::any>> to_replay;
         {
-            typename Policy::UniqueLock lock(state_->mutex);
+            typename Policy::SharedLock lock(state_->mutex);
             auto rit = state_->retained_messages.find(std::string(topic));
             if (rit != state_->retained_messages.end())
                 to_replay = rit->second;
@@ -297,7 +297,7 @@ private:
         }
     }
 
-    TopicRouter::Id allocate_id() {
+    detail::TopicRouter::Id allocate_id() {
         typename Policy::UniqueLock lock(state_->mutex);
         return state_->next_id++;
     }
@@ -305,7 +305,7 @@ private:
     // Create a Subscription whose remover safely removes the entry.
     // If cancel() is called from within a dispatch callback (same thread),
     // skip lock acquisition to avoid deadlock on non-recursive shared_mutex.
-    Subscription make_subscription(TopicRouter::Id id) {
+    Subscription make_subscription(detail::TopicRouter::Id id) {
         auto weak = std::weak_ptr<State>(state_);
         return Subscription(id, [weak, id]() noexcept {
             if (auto s = weak.lock()) {
