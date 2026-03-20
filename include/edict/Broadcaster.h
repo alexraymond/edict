@@ -352,11 +352,17 @@ private:
                 entry_filter = eit->second.filter;
         }
         // Dispatch outside lock, using copies — no dangling refs
+        auto topic_str = std::string(topic);
         for (const auto& msg : to_replay) {
             try {
                 if (!entry_filter || entry_filter(msg.packed))
                     callable(msg.packed);
-            } catch (...) {}
+            } catch (...) {
+                try {
+                    if (state_->error_handler)
+                        state_->error_handler(std::current_exception(), topic_str);
+                } catch (...) {}
+            }
         }
     }
 

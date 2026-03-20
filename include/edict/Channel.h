@@ -71,12 +71,23 @@ public:
     /// Publish to all subscribers. Exception-safe: if a subscriber throws,
     /// remaining subscribers still fire. Reentrant-safe via snapshot dispatch.
     void publish(const Args&... args) const {
+        if (entries_.empty()) return;
         auto snapshot = entries_;
         for (const auto& entry : snapshot) {
             try {
                 entry.callable(args...);
-            } catch (...) {}
+            } catch (...) {
+                try {
+                    if (error_handler_)
+                        error_handler_(std::current_exception(), topic_);
+                } catch (...) {}
+            }
         }
+    }
+
+    /// Set callback for subscriber exceptions.
+    void set_error_handler(ErrorHandler handler) {
+        error_handler_ = std::move(handler);
     }
 
     [[nodiscard]] const std::string& topic() const noexcept { return topic_; }
@@ -99,6 +110,7 @@ private:
     std::vector<Entry> entries_;
     Subscription::Id next_id_ = 1;
     std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
+    ErrorHandler error_handler_;
 };
 
 } // namespace edict
