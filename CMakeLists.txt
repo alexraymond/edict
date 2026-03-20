@@ -1,32 +1,41 @@
-cmake_minimum_required(VERSION 3.1.0)
+cmake_minimum_required(VERSION 3.25)
+project(edict VERSION 1.0.0 LANGUAGES CXX)
 
-project(edict)
+add_library(edict INTERFACE)
+add_library(edict::edict ALIAS edict)
 
-# Global configuration for all projects
-set(EDICT_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include/edict)
+target_include_directories(edict INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+target_compile_features(edict INTERFACE cxx_std_23)
 
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+option(EDICT_BUILD_TESTS "Build tests" OFF)
+option(EDICT_BUILD_EXAMPLES "Build examples" OFF)
 
-# Configure the output directories
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-
-if("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
-    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
-else()
-    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_ARCHIVE_OUTPUT_DIRECTORY})
+if(EDICT_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(test)
+endif()
+if(EDICT_BUILD_EXAMPLES)
+    add_subdirectory(examples)
 endif()
 
-# Common properties
-set(CMAKE_INCLUDE_CURRENT_DIR ON)
+include(GNUInstallDirs)
+install(TARGETS edict EXPORT edictTargets)
+install(DIRECTORY include/edict DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(EXPORT edictTargets FILE edictTargets.cmake NAMESPACE edict::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/edict)
 
-if(CMAKE_COMPILER_IS_GNUCXX)
-    add_definitions(-std=c++11)
-endif()
-
-if(MSVC)
-    add_definitions(-D_WIN32_WINNT=0x600)
-endif()
-
-# Add all the example projects
-add_subdirectory(examples)
+include(CMakePackageConfigHelpers)
+configure_package_config_file(cmake/edictConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/edictConfig.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/edict)
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/edictConfigVersion.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion)
+install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/edictConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/edictConfigVersion.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/edict)

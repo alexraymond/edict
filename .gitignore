@@ -1,4 +1,11 @@
-# Visual Studio files
-.vs/*
 _build/*
+build/*
+out/*
+.vs/*
+.vscode/*
+.idea/*
 CMakeSettings.json
+compile_commands.json
+.superpowers/*
+.DS_Store
+.claude/*
