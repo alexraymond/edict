@@ -16,6 +16,7 @@ add_executable(edict_tests
     test_reentrancy.cpp
     test_blackboard.cpp
     test_free_functions.cpp
+    test_threading.cpp
 )
 
 target_link_libraries(edict_tests PRIVATE edict::edict doctest::doctest_with_main)

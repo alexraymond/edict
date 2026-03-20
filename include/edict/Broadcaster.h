@@ -8,11 +8,14 @@
 
 #include <algorithm>
 #include <any>
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -104,10 +107,19 @@ public:
             (packed.emplace_back(args), ...);
         }
 
+        // Check if we're already dispatching on this thread (reentrant publish)
+        const auto this_thread = std::this_thread::get_id();
+        const bool reentrant = (state_->dispatching_thread.load() == this_thread);
+
         // Snapshot matched entries by value — safe for concurrent unsubscribe
         std::vector<SubscriptionEntry> snapshot;
         {
-            typename Policy::UniqueLock lock(state_->mutex);
+            // Only lock if not reentrant — avoid UB from re-acquiring shared_mutex
+            std::optional<typename Policy::UniqueLock> lock;
+            if (!reentrant) {
+                lock.emplace(state_->mutex);
+                state_->dispatching_thread.store(this_thread);
+            }
             state_->router.match(topic, [&](TopicRouter::Id id) {
                 if (auto it = state_->entries.find(id); it != state_->entries.end())
                     snapshot.push_back(it->second);
@@ -130,6 +142,10 @@ public:
                 } catch (...) {}
             }
         }
+
+        if (!reentrant) {
+            state_->dispatching_thread.store(std::thread::id{});
+        }
     }
 
     // ── Queue / Dispatch ─────────────────────────────────────────────────
@@ -148,16 +164,26 @@ public:
     }
 
     void dispatch() {
+        // Check if we're already dispatching on this thread (reentrant dispatch)
+        const auto this_thread = std::this_thread::get_id();
+        const bool reentrant = (state_->dispatching_thread.load() == this_thread);
+
         std::vector<QueuedMessage> pending;
         {
-            typename Policy::UniqueLock lock(state_->mutex);
+            std::optional<typename Policy::UniqueLock> lock;
+            if (!reentrant) {
+                lock.emplace(state_->mutex);
+                state_->dispatching_thread.store(this_thread);
+            }
             pending.swap(state_->message_queue);
         }
 
         for (auto& msg : pending) {
             std::vector<SubscriptionEntry> snapshot;
             {
-                typename Policy::UniqueLock lock(state_->mutex);
+                std::optional<typename Policy::UniqueLock> lock;
+                if (!reentrant)
+                    lock.emplace(state_->mutex);
                 state_->router.match(msg.topic, [&](TopicRouter::Id id) {
                     if (auto it = state_->entries.find(id); it != state_->entries.end())
                         snapshot.push_back(it->second);
@@ -179,6 +205,10 @@ public:
                     } catch (...) {}
                 }
             }
+        }
+
+        if (!reentrant) {
+            state_->dispatching_thread.store(std::thread::id{});
         }
     }
 
@@ -227,6 +257,7 @@ private:
         ErrorHandler error_handler;
         std::uint64_t next_id = 1;
         mutable typename Policy::Mutex mutex;
+        std::atomic<std::thread::id> dispatching_thread{};
     };
 
     std::shared_ptr<State> state_;
@@ -241,7 +272,15 @@ private:
         return Subscription(id, [weak, id]() noexcept {
             if (auto s = weak.lock()) {
                 try {
-                    typename Policy::UniqueLock lock(s->mutex);
+                    // Check if cancel is called during dispatch (reentrant)
+                    const auto this_thread = std::this_thread::get_id();
+                    const bool reentrant =
+                        (s->dispatching_thread.load() == this_thread);
+
+                    std::optional<typename Policy::UniqueLock> lock;
+                    if (!reentrant)
+                        lock.emplace(s->mutex);
+
                     s->router.remove(id);
                     s->entries.erase(id);
                 } catch (...) {}
