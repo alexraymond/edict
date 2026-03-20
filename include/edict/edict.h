@@ -1,9 +1,9 @@
-/*
- * Edict is a blackboard messaging system -- have fun!
- * Copyright (c) 2018 Alex Raymond, Kier Dugan.
- */
-
 #pragma once
 
-
+#include <edict/Blackboard.h>
 #include <edict/Broadcaster.h>
+#include <edict/Channel.h>
+#include <edict/Error.h>
+#include <edict/Policy.h>
+#include <edict/Subscription.h>
+#include <edict/TopicRouter.h>

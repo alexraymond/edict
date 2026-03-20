@@ -14,6 +14,8 @@ add_executable(edict_tests
     test_topic_router.cpp
     test_broadcaster.cpp
     test_reentrancy.cpp
+    test_blackboard.cpp
+    test_free_functions.cpp
 )
 
 target_link_libraries(edict_tests PRIVATE edict::edict doctest::doctest_with_main)
