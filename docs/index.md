@@ -9,7 +9,7 @@ nav_order: 1
 A header-only C++23 pub/sub and blackboard library. Zero dependencies. Maximum power, minimum ceremony.
 {: .fs-6 .fw-300 }
 
-[Get Started]({% link guide.md %}){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
+[Get Started](guide){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [View on GitHub](https://github.com/alexraymond/edict){: .btn .fs-5 .mb-4 .mb-md-0 }
 
 ---
