@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 #include <edict/Subscription.h>
+#include <edict/Broadcaster.h>
 #include <memory>
 
 using namespace edict;
@@ -103,4 +104,21 @@ TEST_CASE("SubscriptionGroup is move-only") {
     SubscriptionGroup b{std::move(a)};
     CHECK(b.size() == 1);
     CHECK(a.size() == 0);
+}
+
+TEST_CASE("SubscriptionGroup with real Broadcaster") {
+    edict::Broadcaster<> bus;
+    int count = 0;
+    {
+        edict::SubscriptionGroup group;
+        group += bus.subscribe("a", [&]() { ++count; });
+        group += bus.subscribe("b", [&]() { ++count; });
+        bus.publish("a");
+        bus.publish("b");
+        CHECK(count == 2);
+    }
+    // group destroyed — all subs cancelled
+    bus.publish("a");
+    bus.publish("b");
+    CHECK(count == 2);
 }

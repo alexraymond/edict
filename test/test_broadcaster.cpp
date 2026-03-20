@@ -160,6 +160,18 @@ TEST_CASE("Broadcaster: active_topics") {
     CHECK(topics == std::vector<std::string>{"a", "b"});
 }
 
+TEST_CASE("Broadcaster: active_topics excludes patterns and predicates") {
+    edict::Broadcaster<> b;
+    auto s1 = b.subscribe("exact/topic", []() {});
+    auto s2 = b.subscribe_pattern("wild/*", []() {});
+    auto s3 = b.subscribe(
+        [](std::string_view t) { return true; },
+        []() {});
+    auto topics = b.active_topics();
+    CHECK(topics.size() == 1);
+    CHECK(topics[0] == "exact/topic");
+}
+
 TEST_CASE("Broadcaster: independent topics") {
     edict::Broadcaster<> b;
     int a = 0, bc = 0;

@@ -42,3 +42,19 @@ TEST_CASE("filter: doesn't affect unfiltered subscribers") {
     CHECK(unfiltered_count == 1);
     CHECK(filtered_count == 0);
 }
+
+TEST_CASE("filter: combined with replay") {
+    edict::Broadcaster<> b;
+    b.retain("test", 5);
+    b.publish("test", 10);
+    b.publish("test", 60);
+    b.publish("test", 30);
+    b.publish("test", 80);
+
+    int sum = 0;
+    auto sub = b.subscribe("test",
+        [&](int v) { sum += v; },
+        edict::filter([](int v) { return v > 50; }),
+        {.replay = true});
+    CHECK(sum == 60 + 80);  // only values > 50 replayed
+}

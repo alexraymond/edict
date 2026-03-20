@@ -84,6 +84,31 @@ TEST_CASE("SharedBroadcaster: self-cancel during dispatch does not deadlock") {
     CHECK(count == 1); // cancelled
 }
 
+TEST_CASE("SharedBroadcaster: concurrent predicate subscribe/publish") {
+    edict::Broadcaster<edict::MultiThreaded> bus;
+    std::atomic<int> count{0};
+    std::atomic<bool> running{true};
+
+    // Thread that continuously adds/removes predicate subscriptions
+    std::thread modifier([&] {
+        while (running.load(std::memory_order_relaxed)) {
+            auto sub = bus.subscribe(
+                [](std::string_view t) { return t.starts_with("test"); },
+                [&]() { count.fetch_add(1, std::memory_order_relaxed); });
+            // sub immediately destroyed — unsubscribes
+        }
+    });
+
+    // Concurrent publishes
+    for (int i = 0; i < 200; ++i)
+        bus.publish("test/data", i);
+
+    running.store(false, std::memory_order_relaxed);
+    modifier.join();
+    // No crash, no TSan error = success
+    CHECK(true);
+}
+
 TEST_CASE("SharedBlackboard: concurrent set and get") {
     edict::Blackboard<edict::MultiThreaded> bb;
     std::atomic<int> observations{0};
