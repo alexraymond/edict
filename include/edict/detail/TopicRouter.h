@@ -13,6 +13,15 @@
 
 namespace edict::detail {
 
+// Transparent hash for heterogeneous string_view lookup on unordered_map<string>.
+// Eliminates heap allocation when looking up by string_view.
+struct StringHash {
+    using is_transparent = void;
+    [[nodiscard]] std::size_t operator()(std::string_view sv) const noexcept {
+        return std::hash<std::string_view>{}(sv);
+    }
+};
+
 class TopicRouter {
 public:
     using Id = std::uint64_t;
@@ -52,9 +61,11 @@ public:
         reg_.erase(it);
     }
 
+    // Callback-based matching — zero heap allocation for exact lookups
+    // thanks to transparent hash.
     template <typename F>
     void match(std::string_view topic, F&& on_match) const {
-        if (auto it = exact_.find(std::string(topic)); it != exact_.end())
+        if (auto it = exact_.find(topic); it != exact_.end())
             for (auto id : it->second)
                 on_match(id);
         tree_.match(topic, on_match);
@@ -87,7 +98,8 @@ private:
     struct PatternReg { std::string pattern; };
     struct PredicateReg {};
 
-    std::unordered_map<std::string, std::unordered_set<Id>> exact_;
+    // Transparent hash enables find(string_view) without allocating std::string.
+    std::unordered_map<std::string, std::unordered_set<Id>, StringHash, std::equal_to<>> exact_;
     detail::TopicTree tree_;
     std::vector<std::pair<Predicate, Id>> predicates_;
     std::unordered_map<Id, std::variant<ExactReg, PatternReg, PredicateReg>> reg_;

@@ -159,6 +159,8 @@ public:
 
     template <typename... Args>
     void queue(std::string_view topic, Args&&... args) {
+        if (!detail::TopicTree::validate_publish_topic(topic))
+            return;
         std::vector<std::any> packed;
         if constexpr (sizeof...(Args) > 0) {
             packed.reserve(sizeof...(Args));

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -50,7 +51,7 @@ public:
         bool found = true;
         for_each_segment(pattern, [&](std::string_view seg) {
             if (!found) return;
-            auto it = node->children.find(std::string(seg));
+            auto it = node->children.find(seg);
             if (it == node->children.end()) { found = false; return; }
             node = &it->second;
         });
@@ -67,8 +68,16 @@ public:
     }
 
 private:
+    // Transparent hash enables find(string_view) without constructing std::string.
+    struct StringHash {
+        using is_transparent = void;
+        [[nodiscard]] std::size_t operator()(std::string_view sv) const noexcept {
+            return std::hash<std::string_view>{}(sv);
+        }
+    };
+
     struct Node {
-        std::unordered_map<std::string, Node> children;
+        std::unordered_map<std::string, Node, StringHash, std::equal_to<>> children;
         std::vector<Id> ids;
     };
 
@@ -88,7 +97,8 @@ private:
     template <typename F>
     void match_impl(const Node& node, const std::vector<std::string_view>& segments,
                     std::size_t depth, F&& on_match) const {
-        if (auto it = node.children.find("**"); it != node.children.end())
+        // ** matches zero or more remaining segments (terminal only)
+        if (auto it = node.children.find(std::string_view{"**"}); it != node.children.end())
             for (auto id : it->second.ids)
                 on_match(id);
 
@@ -98,10 +108,12 @@ private:
             return;
         }
 
-        if (auto it = node.children.find(std::string(segments[depth])); it != node.children.end())
+        // Exact segment match — transparent lookup, no std::string allocation
+        if (auto it = node.children.find(segments[depth]); it != node.children.end())
             match_impl(it->second, segments, depth + 1, on_match);
 
-        if (auto it = node.children.find("*"); it != node.children.end())
+        // * matches any single segment
+        if (auto it = node.children.find(std::string_view{"*"}); it != node.children.end())
             match_impl(it->second, segments, depth + 1, on_match);
     }
 };

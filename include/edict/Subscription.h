@@ -16,8 +16,9 @@ namespace edict {
 class Subscription {
 public:
     using Id = std::uint64_t;
-    // Remover must be noexcept-invocable. When std::move_only_function<void() noexcept>
-    // is available, switch to it for compile-time enforcement.
+    // Ideally std::move_only_function<void() noexcept> (C++23), but not yet
+    // available on all target compilers (AppleClang 17). cancel() wraps the
+    // call in try/catch as a safety net until the noexcept type is enforceable.
     using Remover = std::function<void()>;
 
     Subscription() = default;
