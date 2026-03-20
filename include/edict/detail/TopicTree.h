@@ -10,6 +10,9 @@
 
 namespace edict::detail {
 
+/// Maximum topic depth to prevent stack overflow from untrusted input.
+inline constexpr std::size_t max_topic_depth = 64;
+
 /// Transparent hash for heterogeneous string_view lookup on unordered_map<string>.
 /// Eliminates heap allocation when looking up by string_view.
 struct StringHash {
@@ -26,6 +29,7 @@ public:
     static bool validate_topic(std::string_view topic) noexcept {
         if (topic.empty() || topic.front() == '/' || topic.back() == '/') return false;
         bool seen_globstar = false;
+        std::size_t depth = 0;
         std::size_t pos = 0;
         while (pos <= topic.size()) {
             auto sep = topic.find('/', pos);
@@ -34,6 +38,7 @@ public:
             if (seg.empty()) return false;
             if (seen_globstar) return false;
             if (seg == "**") seen_globstar = true;
+            if (++depth > max_topic_depth) return false;
             if (sep == std::string_view::npos) break;
             pos = sep + 1;
         }

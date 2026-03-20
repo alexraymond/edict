@@ -161,16 +161,11 @@ public:
         if (!detail::TopicTree::validate_publish_topic(topic))
             return;
 
-        // Collect snapshot first — defer arg packing until we know someone is listening
+        // Collect snapshot (includes retention check under the same lock — no TOCTOU)
         auto snap = collect_snapshot(topic);
 
-        // Fast path: skip packing + string alloc if no subscribers and no retention
-        bool has_retention;
-        {
-            typename Policy::SharedLock lock(state_->mutex);
-            has_retention = state_->retention_config.contains(topic);
-        }
-        if (snap.entries.empty() && !has_retention)
+        // Fast path: skip packing if no subscribers and no retention
+        if (snap.entries.empty() && !snap.has_retention)
             return;
 
         std::vector<std::any> packed;
@@ -288,6 +283,7 @@ private:
     struct Snapshot {
         std::vector<SubscriptionEntry> entries;
         ErrorHandler error_handler;
+        bool has_retention = false;
     };
 
     // Collect matching entries + error handler.
@@ -304,6 +300,7 @@ private:
                     snap.entries.push_back(it->second);
             });
             snap.error_handler = state_->error_handler;
+            snap.has_retention = state_->retention_config.contains(topic);
             preds = state_->router.predicates_snapshot();
         }
         // Predicate evaluation on snapshot — safe from data race AND reentrant predicates.
@@ -398,7 +395,10 @@ private:
                     typename Policy::UniqueLock lock(s->mutex);
                     s->router.remove(id);
                     s->entries.erase(id);
-                } catch (...) {}
+                } catch (...) {
+                    // Remover must not throw (called from destructor).
+                    // Failure here means the entry leaks — indicates allocator failure.
+                }
             }
         });
     }
