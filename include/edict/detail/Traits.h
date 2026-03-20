@@ -145,12 +145,19 @@ concept Subscribable =
 // Wraps (object_pointer, member_function) into a callable.
 // IMPORTANT: The caller must ensure obj outlives the returned callable.
 
-template <typename T, typename MF>
-[[nodiscard]] auto bind_member(T* obj, MF method) {
-    return [obj, method]<typename... As>(As&&... args)
-        -> decltype((obj->*method)(std::forward<As>(args)...))
-    {
-        return (obj->*method)(std::forward<As>(args)...);
+// Non-const member function
+template <typename T, typename R, typename... MArgs>
+[[nodiscard]] auto bind_member(T* obj, R(T::*method)(MArgs...)) {
+    return [obj, method](MArgs... args) -> R {
+        return (obj->*method)(std::forward<MArgs>(args)...);
+    };
+}
+
+// Const member function
+template <typename T, typename R, typename... MArgs>
+[[nodiscard]] auto bind_member(T* obj, R(T::*method)(MArgs...) const) {
+    return [obj, method](MArgs... args) -> R {
+        return (obj->*method)(std::forward<MArgs>(args)...);
     };
 }
 

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <exception>
+#include <functional>
 #include <string_view>
 #include <utility>
 
@@ -40,5 +42,8 @@ template <typename Pred>
 [[nodiscard]] Filter<Pred> filter(Pred&& pred) {
     return Filter<Pred>{std::forward<Pred>(pred)};
 }
+
+/// Error handler for subscriber exceptions.
+using ErrorHandler = std::function<void(std::exception_ptr, std::string_view topic)>;
 
 } // namespace edict

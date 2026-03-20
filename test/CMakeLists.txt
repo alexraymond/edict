@@ -10,6 +10,10 @@ add_executable(edict_tests
     test_traits.cpp
     test_subscription.cpp
     test_topic_tree.cpp
+    test_channel.cpp
+    test_topic_router.cpp
+    test_broadcaster.cpp
+    test_reentrancy.cpp
 )
 
 target_link_libraries(edict_tests PRIVATE edict::edict doctest::doctest_with_main)
