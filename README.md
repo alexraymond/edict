@@ -28,6 +28,9 @@ events.publish(42, "fire");
 - **Priority ordering** — control which subscribers fire first
 - **Queue/dispatch** — deferred message delivery for game loops
 - **Exception isolation** — one subscriber throwing doesn't break others
+- **Filtered subscriptions** — conditional dispatch based on published data
+- **Message retention/replay** — late subscribers receive recent history
+- **Blackboard** — typed key-value state store with change observation
 - **Threading policies** — zero-cost single-threaded or `shared_mutex` multi-threaded
 - **Header-only** — copy the headers and go. No build step, no dependencies.
 
@@ -172,6 +175,54 @@ public:
 };
 ```
 
+### Filtered Subscriptions
+
+```cpp
+#include <edict/Error.h>  // for edict::filter
+
+auto sub = bus.subscribe("damage",
+    [](int amount) { apply_screen_shake(); },
+    edict::filter([](int amount) { return amount > 50; }));
+
+bus.publish("damage", 10);   // filter rejects — handler NOT called
+bus.publish("damage", 100);  // filter passes — handler called
+```
+
+### Message Retention / Replay
+
+```cpp
+bus.retain("sensor/temp", 5);  // keep last 5 messages
+
+bus.publish("sensor/temp", 20.0);
+bus.publish("sensor/temp", 21.0);
+bus.publish("sensor/temp", 22.0);
+
+// Late subscriber receives retained history immediately
+auto sub = bus.subscribe("sensor/temp",
+    [](double t) { std::cout << t << "\n"; },
+    {.replay = true});
+// Prints: 20, 21, 22
+```
+
+### Blackboard — Typed State Store
+
+```cpp
+#include <edict/Blackboard.h>
+
+edict::Blackboard<> board;
+
+board.set("player/health", 100);
+
+auto obs = board.observe<int>("player/health",
+    [](std::optional<int> old_val, int new_val) {
+        std::cout << "Health: " << new_val << "\n";
+    });
+
+board.set("player/health", 75);  // observer fires
+
+auto hp = board.get<int>("player/health");  // returns std::expected<int, Error>
+```
+
 ### Threading
 
 ```cpp
@@ -179,8 +230,19 @@ public:
 edict::Broadcaster<> bus;
 
 // Thread-safe with shared_mutex
-edict::Broadcaster<edict::MultiThreaded> bus;
-// or: edict::SharedBroadcaster bus;
+edict::SharedBroadcaster bus;
+```
+
+### Global Convenience API (opt-in)
+
+```cpp
+#include <edict/global.h>
+
+auto sub = edict::subscribe("topic", [](int v) { /* ... */ });
+edict::publish("topic", 42);
+
+edict::set("key", 100);
+auto val = edict::get<int>("key");
 ```
 
 ## Examples
@@ -191,6 +253,9 @@ edict::Broadcaster<edict::MultiThreaded> bus;
 | [game-events](examples/game-events/) | Typed channels, SubscriptionGroup, partial arg matching |
 | [broadcaster](examples/broadcaster/) | String topics, wildcards, predicates, queue/dispatch |
 | [wildcards](examples/wildcards/) | Hierarchical topics with `*` and `**` patterns |
+| [blackboard](examples/blackboard/) | Typed state store with change observation |
+| [threaded](examples/threaded/) | SharedBroadcaster with concurrent publishers |
+| [queued-dispatch](examples/queued-dispatch/) | Game-loop style batched delivery |
 
 ## Requirements
 
