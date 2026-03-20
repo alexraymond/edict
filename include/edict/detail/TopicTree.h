@@ -58,11 +58,11 @@ public:
 
     template <typename F>
     void match(std::string_view topic, F&& on_match) const {
-        segments_.clear();
-        for_each_segment(topic, [this](std::string_view seg) {
-            segments_.push_back(seg);
+        std::vector<std::string_view> segments;
+        for_each_segment(topic, [&segments](std::string_view seg) {
+            segments.push_back(seg);
         });
-        match_impl(root_, 0, on_match);
+        match_impl(root_, segments, 0, on_match);
     }
 
 private:
@@ -72,7 +72,6 @@ private:
     };
 
     Node root_;
-    mutable std::vector<std::string_view> segments_;
 
     static void for_each_segment(std::string_view s, auto&& fn) {
         std::size_t pos = 0;
@@ -86,22 +85,23 @@ private:
     }
 
     template <typename F>
-    void match_impl(const Node& node, std::size_t depth, F&& on_match) const {
+    void match_impl(const Node& node, const std::vector<std::string_view>& segments,
+                    std::size_t depth, F&& on_match) const {
         if (auto it = node.children.find("**"); it != node.children.end())
             for (auto id : it->second.ids)
                 on_match(id);
 
-        if (depth == segments_.size()) {
+        if (depth == segments.size()) {
             for (auto id : node.ids)
                 on_match(id);
             return;
         }
 
-        if (auto it = node.children.find(std::string(segments_[depth])); it != node.children.end())
-            match_impl(it->second, depth + 1, on_match);
+        if (auto it = node.children.find(std::string(segments[depth])); it != node.children.end())
+            match_impl(it->second, segments, depth + 1, on_match);
 
         if (auto it = node.children.find("*"); it != node.children.end())
-            match_impl(it->second, depth + 1, on_match);
+            match_impl(it->second, segments, depth + 1, on_match);
     }
 };
 
