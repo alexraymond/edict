@@ -104,24 +104,25 @@ public:
             (packed.emplace_back(args), ...);
         }
 
-        std::vector<SubscriptionEntry*> matched;
+        // Snapshot matched entries by value — safe for concurrent unsubscribe
+        std::vector<SubscriptionEntry> snapshot;
         {
             typename Policy::UniqueLock lock(state_->mutex);
             state_->router.match(topic, [&](TopicRouter::Id id) {
                 if (auto it = state_->entries.find(id); it != state_->entries.end())
-                    matched.push_back(&it->second);
+                    snapshot.push_back(it->second);
             });
         }
 
-        std::stable_sort(matched.begin(), matched.end(),
-            [](const SubscriptionEntry* a, const SubscriptionEntry* b) {
-                return a->priority > b->priority;
+        std::stable_sort(snapshot.begin(), snapshot.end(),
+            [](const SubscriptionEntry& a, const SubscriptionEntry& b) {
+                return a.priority > b.priority;
             });
 
         auto topic_str = std::string(topic);
-        for (auto* entry : matched) {
+        for (const auto& entry : snapshot) {
             try {
-                entry->callable(packed);
+                entry.callable(packed);
             } catch (...) {
                 try {
                     if (state_->error_handler)
@@ -154,23 +155,23 @@ public:
         }
 
         for (auto& msg : pending) {
-            std::vector<SubscriptionEntry*> matched;
+            std::vector<SubscriptionEntry> snapshot;
             {
                 typename Policy::UniqueLock lock(state_->mutex);
                 state_->router.match(msg.topic, [&](TopicRouter::Id id) {
                     if (auto it = state_->entries.find(id); it != state_->entries.end())
-                        matched.push_back(&it->second);
+                        snapshot.push_back(it->second);
                 });
             }
 
-            std::stable_sort(matched.begin(), matched.end(),
-                [](const SubscriptionEntry* a, const SubscriptionEntry* b) {
-                    return a->priority > b->priority;
+            std::stable_sort(snapshot.begin(), snapshot.end(),
+                [](const SubscriptionEntry& a, const SubscriptionEntry& b) {
+                    return a.priority > b.priority;
                 });
 
-            for (auto* entry : matched) {
+            for (const auto& entry : snapshot) {
                 try {
-                    entry->callable(msg.packed);
+                    entry.callable(msg.packed);
                 } catch (...) {
                     try {
                         if (state_->error_handler)
