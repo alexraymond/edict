@@ -51,7 +51,7 @@ public:
             typename Policy::UniqueLock lock(state_->mutex);
             state_->router.add_exact(std::string(topic), id);
             state_->entries.emplace(id, SubscriptionEntry{
-                std::move(erased), opts.priority, std::string(topic), {}});
+                erased, opts.priority, std::string(topic), {}});
         }
 
         replay_retained(id, topic, erased, opts);
@@ -122,8 +122,8 @@ public:
             typename Policy::UniqueLock lock(state_->mutex);
             state_->router.add_exact(std::string(topic), id);
             state_->entries.emplace(id, SubscriptionEntry{
-                std::move(erased), opts.priority, std::string(topic),
-                std::move(erased_filter)});
+                erased, opts.priority, std::string(topic),
+                erased_filter});
         }
 
         replay_retained(id, topic, erased, opts);
