@@ -9,75 +9,70 @@ nav_order: 1
 A header-only C++23 pub/sub and blackboard library. Zero dependencies. Maximum power, minimum ceremony.
 {: .fs-6 .fw-300 }
 
-[Get Started](guide){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
+[Get Started](getting-started){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [View on GitHub](https://github.com/alexraymond/edict){: .btn .fs-5 .mb-4 .mb-md-0 }
 
 ---
 
-## Quick Start
+## What is Edict?
+
+Edict lets C++ components communicate without knowing about each other. A sensor publishes temperature readings. A display subscribes and shows them. Neither has a pointer to the other. Neither includes the other's header. They're connected only by a shared topic.
 
 ```cpp
 #include <edict/Channel.h>
+#include <iostream>
 
-edict::Channel<int, std::string> events("damage");
+// A typed channel — the publisher and subscriber agree on (int, std::string)
+edict::Channel<int, std::string> events;
 
+// Subscribe: any callable that takes a prefix of the channel's types
 auto sub = events.subscribe([](int amount, const std::string& type) {
     std::cout << amount << " " << type << " damage!\n";
 });
 
-events.publish(42, "fire");
+events.publish(42, "fire");  // prints: 42 fire damage!
 ```
 
-## Two Layers, One API
+That's the entire API. Subscribe returns a handle. When the handle dies, you're unsubscribed. When you publish, every subscriber fires.
 
-**Typed Channels** — zero-cost, compile-time safe, no type erasure:
+## Why Edict?
 
-```cpp
-edict::Channel<int, DamageType> damage;
-auto sub = damage.subscribe([](int amount, DamageType type) { /* ... */ });
-damage.publish(42, DamageType::Fire);
-```
+**Two paths, zero compromises:**
 
-**String-Topic Broadcaster** — dynamic routing with wildcards:
+| | Typed Channel | String-Topic Broadcaster |
+|:--|:--|:--|
+| **Type safety** | Compile-time | Runtime (`std::any`) |
+| **Overhead** | Zero — direct function call | Small — any_cast per arg |
+| **Topics** | Implicit (one channel = one topic) | Dynamic strings with wildcards |
+| **Best for** | Hot paths, game systems, known types | Config-driven routing, plugins |
 
-```cpp
-edict::Broadcaster<> bus;
-auto sub = bus.subscribe("player/damage", [](int amount) { /* ... */ });
-bus.publish("player/damage", 42);
-```
+Most libraries force you to choose. Edict gives you both, and they share the same subscription model.
 
-Both support partial argument matching, priority ordering, RAII subscriptions, exception isolation, and threading policies.
+**What you get:**
 
-## Features
-
-| Feature | Description |
-|:--------|:------------|
-| **Typed Channels** | `Channel<Args...>` with zero type erasure on publish |
-| **String Topics** | `Broadcaster<Policy>` with dynamic routing |
-| **Partial Args** | Zero-arg watchers, partial subscribers, full handlers |
-| **Wildcards** | `*` (one segment) and `**` (multi-level) patterns |
-| **Predicates** | Custom topic matching functions |
-| **RAII Subscriptions** | Automatic cleanup, no manual unsubscribe |
-| **Subscription Groups** | One object manages multiple lifetimes |
-| **Priority** | Control callback firing order |
-| **Queue/Dispatch** | Deferred delivery for game loops |
-| **Filters** | Conditional dispatch based on published data |
-| **Retention/Replay** | Late subscribers receive recent history |
-| **Blackboard** | Typed key-value state store with observation |
-| **Threading** | Zero-cost single-threaded or shared_mutex multi-threaded |
-| **Header-Only** | Copy and go. Zero dependencies. |
+- **Partial argument matching** — a subscriber taking `(int)` works on a channel publishing `(int, float, string)`. A zero-arg `()` subscriber works on any channel — it's just notified.
+- **RAII subscriptions** — no manual cleanup. Subscription dies? You're unsubscribed.
+- **Priority ordering** — control which subscribers fire first.
+- **Wildcards** — `sensor/*` matches `sensor/kitchen`, `sensor/**` matches everything beneath.
+- **Filters** — skip the callback unless the data meets a condition.
+- **Queue/dispatch** — batch messages and deliver them all at once (game-loop pattern).
+- **Retention/replay** — new subscribers receive the last N messages on a topic.
+- **Blackboard** — a typed key-value store with change observation.
+- **Threading** — zero-cost single-threaded by default. One-word upgrade to thread-safe.
+- **Zero dependencies** — pure C++23 standard library. Header-only. Copy and go.
 
 ## Installation
 
-Copy the headers:
+**Copy the headers** into your project:
 
 ```bash
-cp -r include/edict /your/project/include/
+cp -r include/edict your_project/include/
 ```
 
-Or use CMake FetchContent:
+**Or use CMake** (any of these methods):
 
 ```cmake
+# FetchContent (recommended)
 include(FetchContent)
 FetchContent_Declare(edict
     GIT_REPOSITORY https://github.com/alexraymond/edict.git
@@ -86,7 +81,14 @@ FetchContent_MakeAvailable(edict)
 target_link_libraries(myapp PRIVATE edict::edict)
 ```
 
+```cmake
+# add_subdirectory (if vendored)
+add_subdirectory(vendor/edict)
+target_link_libraries(myapp PRIVATE edict::edict)
+```
+
 ## Requirements
 
-- C++23 (`-std=c++23`)
-- GCC 14+, Clang 18+, or MSVC 17.6+
+- **C++23** — compile with `-std=c++23`
+- **GCC 14+**, **Clang 18+** (with libc++), or **MSVC 17.6+**
+- **CMake 3.25+** for building tests and examples
