@@ -10,6 +10,15 @@
 
 namespace edict::detail {
 
+/// Transparent hash for heterogeneous string_view lookup on unordered_map<string>.
+/// Eliminates heap allocation when looking up by string_view.
+struct StringHash {
+    using is_transparent = void;
+    [[nodiscard]] std::size_t operator()(std::string_view sv) const noexcept {
+        return std::hash<std::string_view>{}(sv);
+    }
+};
+
 class TopicTree {
 public:
     using Id = std::uint64_t;
@@ -68,14 +77,6 @@ public:
     }
 
 private:
-    // Transparent hash enables find(string_view) without constructing std::string.
-    struct StringHash {
-        using is_transparent = void;
-        [[nodiscard]] std::size_t operator()(std::string_view sv) const noexcept {
-            return std::hash<std::string_view>{}(sv);
-        }
-    };
-
     struct Node {
         std::unordered_map<std::string, Node, StringHash, std::equal_to<>> children;
         std::vector<Id> ids;

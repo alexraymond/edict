@@ -42,6 +42,8 @@ public:
         requires detail::has_callable_traits_v<F>
     [[nodiscard]] Subscription subscribe(std::string_view topic, F&& handler,
                                           SubscribeOptions opts = {}) {
+        if (!detail::TopicTree::validate_publish_topic(topic))
+            throw std::invalid_argument("edict: invalid topic string");
         // erased is deliberately copied (not moved) into the entry — replay_retained needs it below.
         auto erased = make_erased(std::forward<F>(handler));
         detail::TopicRouter::Id id;
@@ -102,6 +104,8 @@ public:
         requires detail::has_callable_traits_v<F>
     [[nodiscard]] Subscription subscribe(std::string_view topic, F&& handler,
                                           Filter<Pred> filt, SubscribeOptions opts = {}) {
+        if (!detail::TopicTree::validate_publish_topic(topic))
+            throw std::invalid_argument("edict: invalid topic string");
         auto erased = make_erased(std::forward<F>(handler));
         auto erased_filter = make_erased_filter(std::move(filt.predicate));
         detail::TopicRouter::Id id;
@@ -230,8 +234,8 @@ private:
         std::vector<QueuedMessage> message_queue;
         ErrorHandler error_handler;
         std::uint64_t next_id = 1;
-        std::unordered_map<std::string, std::size_t> retention_config;
-        std::unordered_map<std::string, std::deque<std::vector<std::any>>> retained_messages;
+        std::unordered_map<std::string, std::size_t, detail::StringHash, std::equal_to<>> retention_config;
+        std::unordered_map<std::string, std::deque<std::vector<std::any>>, detail::StringHash, std::equal_to<>> retained_messages;
         mutable typename Policy::Mutex mutex;
     };
 
@@ -271,9 +275,9 @@ private:
                      const std::string& topic_str,
                      const ErrorHandler& err_handler) {
         for (const auto& entry : entries) {
-            if (entry.filter && !entry.filter(packed))
-                continue;
             try {
+                if (entry.filter && !entry.filter(packed))
+                    continue;
                 entry.callable(packed);
             } catch (...) {
                 try {

@@ -13,15 +13,6 @@
 
 namespace edict::detail {
 
-// Transparent hash for heterogeneous string_view lookup on unordered_map<string>.
-// Eliminates heap allocation when looking up by string_view.
-struct StringHash {
-    using is_transparent = void;
-    [[nodiscard]] std::size_t operator()(std::string_view sv) const noexcept {
-        return std::hash<std::string_view>{}(sv);
-    }
-};
-
 class TopicRouter {
 public:
     using Id = std::uint64_t;
