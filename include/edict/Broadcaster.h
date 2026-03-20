@@ -83,6 +83,8 @@ public:
         requires std::invocable<Pred, std::string_view> && detail::has_callable_traits_v<F>
     [[nodiscard]] Subscription subscribe(Pred&& predicate, F&& handler,
                                           SubscribeOptions opts = {}) {
+        if (opts.replay)
+            throw std::invalid_argument("edict: replay not supported for predicate subscriptions");
         auto erased = make_erased(std::forward<F>(handler));
         detail::TopicRouter::Id id;
         {
@@ -289,11 +291,13 @@ private:
         if (!opts.replay) return;
 
         std::deque<std::vector<std::any>> to_replay;
+        ErrorHandler err_handler;
         {
             typename Policy::SharedLock lock(state_->mutex);
             auto rit = state_->retained_messages.find(std::string(topic));
             if (rit != state_->retained_messages.end())
                 to_replay = rit->second;
+            err_handler = state_->error_handler;
         }
 
         auto topic_str = std::string(topic);
@@ -303,8 +307,8 @@ private:
                 callable(packed);
             } catch (...) {
                 try {
-                    if (state_->error_handler)
-                        state_->error_handler(std::current_exception(), topic_str);
+                    if (err_handler)
+                        err_handler(std::current_exception(), topic_str);
                 } catch (...) {}
             }
         }

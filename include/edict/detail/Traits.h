@@ -161,4 +161,20 @@ template <typename T, typename R, typename... MArgs>
     };
 }
 
+// Noexcept member function
+template <typename T, typename R, typename... MArgs>
+[[nodiscard]] auto bind_member(T* obj, R(T::*method)(MArgs...) noexcept) {
+    return [obj, method](MArgs... args) noexcept -> R {
+        return (obj->*method)(std::forward<MArgs>(args)...);
+    };
+}
+
+// Const noexcept member function
+template <typename T, typename R, typename... MArgs>
+[[nodiscard]] auto bind_member(T* obj, R(T::*method)(MArgs...) const noexcept) {
+    return [obj, method](MArgs... args) noexcept -> R {
+        return (obj->*method)(std::forward<MArgs>(args)...);
+    };
+}
+
 } // namespace edict::detail

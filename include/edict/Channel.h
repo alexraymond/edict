@@ -26,6 +26,12 @@ class Channel {
 public:
     explicit Channel(std::string topic = {}) : topic_(std::move(topic)) {}
 
+    // Non-copyable, non-movable: subscription removers capture `this`.
+    Channel(const Channel&) = delete;
+    Channel& operator=(const Channel&) = delete;
+    Channel(Channel&&) = delete;
+    Channel& operator=(Channel&&) = delete;
+
     /// Subscribe a callable to this channel.
     /// Returns a move-only Subscription that unsubscribes on destruction.
     template <typename F>
