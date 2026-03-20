@@ -82,6 +82,26 @@ public:
         return make_subscription(id);
     }
 
+    /// Subscribe to a wildcard pattern with a data filter.
+    template <typename F, typename FiltPred>
+        requires detail::has_callable_traits_v<F>
+    [[nodiscard]] Subscription subscribe_pattern(std::string_view pattern, F&& handler,
+                                                  Filter<FiltPred> filt, SubscribeOptions opts = {}) {
+        if (opts.replay)
+            throw std::invalid_argument("edict: replay not supported for pattern subscriptions");
+        auto erased = make_erased(std::forward<F>(handler));
+        auto erased_filter = make_erased_filter(std::move(filt.predicate));
+        detail::TopicRouter::Id id;
+        {
+            typename Policy::UniqueLock lock(state_->mutex);
+            id = state_->next_id++;
+            state_->router.add_pattern(pattern, id);
+            state_->entries.emplace(id, SubscriptionEntry{
+                std::move(erased), opts.priority, std::string(pattern), std::move(erased_filter)});
+        }
+        return make_subscription(id);
+    }
+
     template <typename Pred, typename F>
         requires std::invocable<Pred, std::string_view> && detail::has_callable_traits_v<F>
     [[nodiscard]] Subscription subscribe(Pred&& predicate, F&& handler,
@@ -138,7 +158,7 @@ public:
     template <typename... Args>
     void publish(std::string_view topic, const Args&... args) {
         if (!detail::TopicTree::validate_publish_topic(topic))
-            return; // invalid topic — no subscribers will match anyway
+            return; // invalid topic — silently no-op (validated at subscribe time instead)
 
         std::vector<std::any> packed;
         if constexpr (sizeof...(Args) > 0) {
@@ -164,7 +184,7 @@ public:
     template <typename... Args>
     void queue(std::string_view topic, Args&&... args) {
         if (!detail::TopicTree::validate_publish_topic(topic))
-            return;
+            return; // invalid topic — silently no-op
         std::vector<std::any> packed;
         if constexpr (sizeof...(Args) > 0) {
             packed.reserve(sizeof...(Args));
