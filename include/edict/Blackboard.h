@@ -120,7 +120,7 @@ public:
 private:
     struct State {
         mutable typename Policy::Mutex mutex;
-        std::unordered_map<std::string, std::any> store;
+        std::unordered_map<std::string, std::any, detail::StringHash, std::equal_to<>> store;
         Broadcaster<Policy> broadcaster;
     };
 

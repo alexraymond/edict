@@ -248,17 +248,26 @@ private:
         ErrorHandler error_handler;
     };
 
-    // Collect matching entries + error handler under shared lock.
+    // Collect matching entries + error handler.
+    // Static matches (exact + wildcard) are collected under SharedLock.
+    // Predicate matches are evaluated outside the lock to prevent deadlock
+    // if a predicate calls back into the Broadcaster.
     Snapshot collect_snapshot(std::string_view topic) {
         Snapshot snap;
         {
             typename Policy::SharedLock lock(state_->mutex);
-            state_->router.match(topic, [&](detail::TopicRouter::Id id) {
+            state_->router.match_static(topic, [&](detail::TopicRouter::Id id) {
                 if (auto it = state_->entries.find(id); it != state_->entries.end())
                     snap.entries.push_back(it->second);
             });
             snap.error_handler = state_->error_handler;
         }
+        // Predicate evaluation outside the lock — safe for reentrant predicates
+        state_->router.match_predicates(topic, [&](detail::TopicRouter::Id id) {
+            typename Policy::SharedLock lock(state_->mutex);
+            if (auto it = state_->entries.find(id); it != state_->entries.end())
+                snap.entries.push_back(it->second);
+        });
         // O(N log N) where N is matching subscribers. For hot paths with many
         // subscribers on the same topic, use Channel<Args...> which maintains
         // sorted order at insert time.

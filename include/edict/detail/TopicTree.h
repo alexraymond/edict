@@ -110,38 +110,19 @@ private:
                 on_match(id);
 
         if (pos > topic.size()) {
-            // Past end — collect leaf IDs
             for (auto id : node.ids)
                 on_match(id);
             return;
         }
-
-        if (pos == topic.size() && topic.empty()) {
-            // Edge case: empty topic (shouldn't happen with validation, but safe)
-            for (auto id : node.ids)
-                on_match(id);
-            return;
-        }
-
-        // Check if we've consumed the entire topic
-        if (pos > topic.size()) return;
 
         auto [seg, sep] = next_segment(topic, pos);
         std::size_t next_pos = (sep == std::string_view::npos) ? topic.size() + 1 : sep + 1;
 
-        // Exact segment match
         if (auto it = node.children.find(seg); it != node.children.end())
             match_walk(it->second, topic, next_pos, on_match);
 
-        // * matches any single segment
         if (auto it = node.children.find(std::string_view{"*"}); it != node.children.end())
             match_walk(it->second, topic, next_pos, on_match);
-
-        // If this is the last segment (sep == npos), also check leaf
-        if (sep == std::string_view::npos) {
-            // We're at the final segment — check for exact node match at this depth
-            // (already handled by the exact match above recursing to next_pos > topic.size())
-        }
     }
 };
 

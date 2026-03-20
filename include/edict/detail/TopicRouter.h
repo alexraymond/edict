@@ -52,17 +52,29 @@ public:
         reg_.erase(it);
     }
 
-    // Callback-based matching — zero heap allocation for exact lookups
-    // thanks to transparent hash.
+    /// Match exact topics and wildcard patterns only (lock-safe — no user code invoked).
     template <typename F>
-    void match(std::string_view topic, F&& on_match) const {
+    void match_static(std::string_view topic, F&& on_match) const {
         if (auto it = exact_.find(topic); it != exact_.end())
             for (auto id : it->second)
                 on_match(id);
         tree_.match(topic, on_match);
+    }
+
+    /// Match user predicates only. May invoke arbitrary user code — do NOT
+    /// call while holding a lock that user code might try to acquire.
+    template <typename F>
+    void match_predicates(std::string_view topic, F&& on_match) const {
         for (const auto& [pred, id] : predicates_)
             if (pred(topic))
                 on_match(id);
+    }
+
+    /// Full match (exact + wildcards + predicates). Only safe when no lock is held.
+    template <typename F>
+    void match(std::string_view topic, F&& on_match) const {
+        match_static(topic, on_match);
+        match_predicates(topic, on_match);
     }
 
     [[nodiscard]] bool has_subscribers(std::string_view topic) const {
