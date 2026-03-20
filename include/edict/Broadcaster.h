@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <stdexcept>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -41,10 +42,11 @@ public:
         requires detail::has_callable_traits_v<F>
     [[nodiscard]] Subscription subscribe(std::string_view topic, F&& handler,
                                           SubscribeOptions opts = {}) {
-        auto id = allocate_id();
         auto erased = make_erased(std::forward<F>(handler));
+        detail::TopicRouter::Id id;
         {
             typename Policy::UniqueLock lock(state_->mutex);
+            id = state_->next_id++;
             state_->router.add_exact(std::string(topic), id);
             state_->entries.emplace(id, SubscriptionEntry{
                 erased, opts.priority, std::string(topic), {}});
@@ -63,10 +65,13 @@ public:
         requires detail::has_callable_traits_v<F>
     [[nodiscard]] Subscription subscribe_pattern(std::string_view pattern, F&& handler,
                                                   SubscribeOptions opts = {}) {
-        auto id = allocate_id();
+        if (opts.replay)
+            throw std::invalid_argument("edict: replay not supported for pattern subscriptions");
         auto erased = make_erased(std::forward<F>(handler));
+        detail::TopicRouter::Id id;
         {
             typename Policy::UniqueLock lock(state_->mutex);
+            id = state_->next_id++;
             state_->router.add_pattern(pattern, id);
             state_->entries.emplace(id, SubscriptionEntry{
                 std::move(erased), opts.priority, std::string(pattern), {}});
@@ -78,10 +83,11 @@ public:
         requires std::invocable<Pred, std::string_view> && detail::has_callable_traits_v<F>
     [[nodiscard]] Subscription subscribe(Pred&& predicate, F&& handler,
                                           SubscribeOptions opts = {}) {
-        auto id = allocate_id();
         auto erased = make_erased(std::forward<F>(handler));
+        detail::TopicRouter::Id id;
         {
             typename Policy::UniqueLock lock(state_->mutex);
+            id = state_->next_id++;
             state_->router.add_predicate(std::forward<Pred>(predicate), id);
             state_->entries.emplace(id, SubscriptionEntry{
                 std::move(erased), opts.priority, {}, {}});
@@ -93,11 +99,12 @@ public:
         requires detail::has_callable_traits_v<F>
     [[nodiscard]] Subscription subscribe(std::string_view topic, F&& handler,
                                           Filter<Pred> filt, SubscribeOptions opts = {}) {
-        auto id = allocate_id();
         auto erased = make_erased(std::forward<F>(handler));
         auto erased_filter = make_erased_filter(std::move(filt.predicate));
+        detail::TopicRouter::Id id;
         {
             typename Policy::UniqueLock lock(state_->mutex);
+            id = state_->next_id++;
             state_->router.add_exact(std::string(topic), id);
             state_->entries.emplace(id, SubscriptionEntry{
                 erased, opts.priority, std::string(topic), erased_filter});
@@ -129,15 +136,14 @@ public:
             (packed.emplace_back(args), ...);
         }
 
-        // Step 1: collect snapshot under lock, then release
-        auto snapshot = collect_snapshot(topic);
+        auto topic_str = std::string(topic);
+
+        // Step 1: collect snapshot + store retained under lock
+        auto snap = collect_snapshot(topic);
+        store_retained(topic_str, packed);
 
         // Step 2: dispatch outside lock (callbacks may re-enter)
-        auto topic_str = std::string(topic); // deferred until needed for error reporting
-        dispatch_to(snapshot, packed, topic_str);
-
-        // Step 3: store retained under lock
-        store_retained(topic_str, packed);
+        dispatch_to(snap.entries, packed, topic_str, snap.error_handler);
     }
 
     // ── Queue / Dispatch ─────────────────────────────────────────────────
@@ -161,9 +167,9 @@ public:
             pending.swap(state_->message_queue);
         }
         for (auto& msg : pending) {
-            auto snapshot = collect_snapshot(msg.topic);
-            dispatch_to(snapshot, msg.packed, msg.topic);
+            auto snap = collect_snapshot(msg.topic);
             store_retained(msg.topic, msg.packed);
+            dispatch_to(snap.entries, msg.packed, msg.topic, snap.error_handler);
         }
     }
 
@@ -222,36 +228,43 @@ private:
 
     // ── Core helpers ─────────────────────────────────────────────────────
 
-    // Collect matching entries into a priority-sorted snapshot (read-only).
-    std::vector<SubscriptionEntry> collect_snapshot(std::string_view topic) {
-        std::vector<SubscriptionEntry> snapshot;
+    struct Snapshot {
+        std::vector<SubscriptionEntry> entries;
+        ErrorHandler error_handler;
+    };
+
+    // Collect matching entries + error handler under shared lock.
+    Snapshot collect_snapshot(std::string_view topic) {
+        Snapshot snap;
         {
             typename Policy::SharedLock lock(state_->mutex);
             state_->router.match(topic, [&](detail::TopicRouter::Id id) {
                 if (auto it = state_->entries.find(id); it != state_->entries.end())
-                    snapshot.push_back(it->second);
+                    snap.entries.push_back(it->second);
             });
+            snap.error_handler = state_->error_handler;
         }
-        std::stable_sort(snapshot.begin(), snapshot.end(),
+        std::stable_sort(snap.entries.begin(), snap.entries.end(),
             [](const SubscriptionEntry& a, const SubscriptionEntry& b) {
                 return a.priority > b.priority;
             });
-        return snapshot;
+        return snap;
     }
 
-    // Dispatch to a snapshot of entries. No lock held — callbacks may re-enter.
-    void dispatch_to(const std::vector<SubscriptionEntry>& snapshot,
+    // Dispatch to snapshot. No lock held — callbacks may re-enter.
+    void dispatch_to(const std::vector<SubscriptionEntry>& entries,
                      const std::vector<std::any>& packed,
-                     const std::string& topic_str) {
-        for (const auto& entry : snapshot) {
+                     const std::string& topic_str,
+                     const ErrorHandler& err_handler) {
+        for (const auto& entry : entries) {
             if (entry.filter && !entry.filter(packed))
                 continue;
             try {
                 entry.callable(packed);
             } catch (...) {
                 try {
-                    if (state_->error_handler)
-                        state_->error_handler(std::current_exception(), topic_str);
+                    if (err_handler)
+                        err_handler(std::current_exception(), topic_str);
                 } catch (...) {}
             }
         }
@@ -297,14 +310,7 @@ private:
         }
     }
 
-    detail::TopicRouter::Id allocate_id() {
-        typename Policy::UniqueLock lock(state_->mutex);
-        return state_->next_id++;
-    }
-
     // Create a Subscription whose remover safely removes the entry.
-    // If cancel() is called from within a dispatch callback (same thread),
-    // skip lock acquisition to avoid deadlock on non-recursive shared_mutex.
     Subscription make_subscription(detail::TopicRouter::Id id) {
         auto weak = std::weak_ptr<State>(state_);
         return Subscription(id, [weak, id]() noexcept {

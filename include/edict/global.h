@@ -42,6 +42,13 @@ void publish(std::string_view topic, const Args&... args) {
     detail::global_broadcaster().publish(topic, args...);
 }
 
+template <typename F>
+[[nodiscard]] Subscription subscribe_pattern(std::string_view pattern, F&& handler,
+                                              SubscribeOptions opts = {}) {
+    return detail::global_broadcaster().subscribe_pattern(pattern,
+        std::forward<F>(handler), opts);
+}
+
 template <typename... Args>
 void queue(std::string_view topic, Args&&... args) {
     detail::global_broadcaster().queue(topic, std::forward<Args>(args)...);
