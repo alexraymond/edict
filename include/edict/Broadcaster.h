@@ -198,13 +198,26 @@ public:
     // ── Introspection ────────────────────────────────────────────────────
 
     [[nodiscard]] std::size_t subscriber_count(std::string_view topic) const {
-        typename Policy::SharedLock lock(state_->mutex);
-        return state_->router.subscriber_count(topic);
+        std::size_t n = 0;
+        {
+            typename Policy::SharedLock lock(state_->mutex);
+            state_->router.match_static(topic, [&](detail::TopicRouter::Id) { ++n; });
+        }
+        // Predicates evaluated outside lock (may re-enter)
+        state_->router.match_predicates(topic, [&](detail::TopicRouter::Id) { ++n; });
+        return n;
     }
 
     [[nodiscard]] bool has_subscribers(std::string_view topic) const {
-        typename Policy::SharedLock lock(state_->mutex);
-        return state_->router.has_subscribers(topic);
+        {
+            typename Policy::SharedLock lock(state_->mutex);
+            bool found = false;
+            state_->router.match_static(topic, [&](detail::TopicRouter::Id) { found = true; });
+            if (found) return true;
+        }
+        bool found = false;
+        state_->router.match_predicates(topic, [&](detail::TopicRouter::Id) { found = true; });
+        return found;
     }
 
     [[nodiscard]] std::vector<std::string> active_topics() const {
@@ -319,7 +332,7 @@ private:
         ErrorHandler err_handler;
         {
             typename Policy::SharedLock lock(state_->mutex);
-            auto rit = state_->retained_messages.find(std::string(topic));
+            auto rit = state_->retained_messages.find(topic);
             if (rit != state_->retained_messages.end())
                 to_replay = rit->second;
             err_handler = state_->error_handler;

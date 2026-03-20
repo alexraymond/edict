@@ -68,7 +68,7 @@ public:
     template <typename T>
     [[nodiscard]] std::expected<T, Error> get(std::string_view key) const {
         typename Policy::SharedLock lock(state_->mutex);
-        auto it = state_->store.find(std::string(key));
+        auto it = state_->store.find(key);
         if (it == state_->store.end()) {
             return std::unexpected(Error::KeyNotFound);
         }
@@ -92,7 +92,7 @@ public:
     /// Check if a key exists.
     [[nodiscard]] bool has(std::string_view key) const {
         typename Policy::SharedLock lock(state_->mutex);
-        return state_->store.contains(std::string(key));
+        return state_->store.contains(key);
     }
 
     /// Remove a key. Does NOT fire observers (erase has no knowledge of the stored type).
