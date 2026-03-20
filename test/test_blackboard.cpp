@@ -162,3 +162,32 @@ TEST_CASE("Blackboard: set with different type — old value is nullopt") {
     CHECK(fired);
     CHECK_FALSE(old_val_seen.has_value()); // old was int, new is string — old is nullopt
 }
+
+TEST_CASE("Blackboard: erase fires zero-arg observers") {
+    edict::Blackboard<> bb;
+    int count = 0;
+    bb.set("key", 42);
+
+    auto obs = bb.observe<int>("key", [&]() { ++count; });
+
+    bb.set("key", 100);
+    CHECK(count == 1);
+
+    bb.erase("key");
+    CHECK(count == 2); // zero-arg observer fired on erase
+}
+
+TEST_CASE("Blackboard: erase does not fire typed observers") {
+    edict::Blackboard<> bb;
+    int typed_count = 0;
+    bb.set("key", 42);
+
+    // This observer expects (optional<int>, int) — erase publishes no args
+    auto obs = bb.observe<int>("key", [&](std::optional<int>, int) { ++typed_count; });
+
+    bb.set("key", 100);
+    CHECK(typed_count == 1);
+
+    bb.erase("key");
+    CHECK(typed_count == 1); // NOT fired — erase publishes zero args, typed observer needs 2
+}

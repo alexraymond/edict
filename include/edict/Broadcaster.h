@@ -302,7 +302,9 @@ private:
             snap.error_handler = state_->error_handler;
             preds = state_->router.predicates_snapshot();
         }
-        // Predicate evaluation on snapshot — safe from data race AND reentrant predicates
+        // Predicate evaluation on snapshot — safe from data race AND reentrant predicates.
+        // Note: a concurrent unsubscribe between predicate evaluation and entry lookup
+        // may cause the entry to be absent — this is correct (subscriber is being removed).
         for (const auto& [pred, id] : preds) {
             if (pred(topic)) {
                 typename Policy::SharedLock lock(state_->mutex);

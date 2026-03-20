@@ -131,3 +131,47 @@ TEST_CASE("SharedBlackboard: concurrent set and get") {
     for (auto& t : threads) t.join();
     CHECK(observations == num_threads * 100);
 }
+
+TEST_CASE("SharedBlackboard: concurrent observe + erase") {
+    edict::Blackboard<edict::MultiThreaded> bb;
+    std::atomic<int> notifications{0};
+
+    auto obs = bb.observe<int>("key", [&]() {
+        notifications.fetch_add(1, std::memory_order_relaxed);
+    });
+
+    constexpr int rounds = 50;
+    std::vector<std::thread> threads;
+    for (int i = 0; i < 4; ++i) {
+        threads.emplace_back([&, i] {
+            for (int j = 0; j < rounds; ++j) {
+                bb.set("key", i * rounds + j);
+                bb.erase("key");
+            }
+        });
+    }
+    for (auto& t : threads) t.join();
+    // Each set fires the observer, each erase fires zero-arg observers
+    CHECK(notifications > 0);
+}
+
+TEST_CASE("SharedBroadcaster: concurrent dispatch") {
+    edict::Broadcaster<edict::MultiThreaded> bus;
+    std::atomic<int> count{0};
+    auto sub = bus.subscribe("tick", [&]() {
+        count.fetch_add(1, std::memory_order_relaxed);
+    });
+
+    // Queue from main thread
+    for (int i = 0; i < 100; ++i)
+        bus.queue("tick");
+
+    // Dispatch from multiple threads simultaneously
+    std::vector<std::thread> threads;
+    for (int i = 0; i < 4; ++i)
+        threads.emplace_back([&] { bus.dispatch(); });
+    for (auto& t : threads) t.join();
+
+    // All 100 queued messages should be dispatched exactly once
+    CHECK(count == 100);
+}

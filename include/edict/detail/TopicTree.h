@@ -74,6 +74,11 @@ public:
         match_walk(root_, topic, 0, on_match);
     }
 
+    /// Short-circuit: returns true on first match, without visiting remaining nodes.
+    [[nodiscard]] bool has_any_match(std::string_view topic) const {
+        return has_match_walk(root_, topic, 0);
+    }
+
 private:
     struct Node {
         std::unordered_map<std::string, Node, StringHash, std::equal_to<>> children;
@@ -123,6 +128,26 @@ private:
 
         if (auto it = node.children.find(std::string_view{"*"}); it != node.children.end())
             match_walk(it->second, topic, next_pos, on_match);
+    }
+
+    [[nodiscard]] bool has_match_walk(const Node& node, std::string_view topic,
+                                       std::size_t pos) const {
+        if (auto it = node.children.find(std::string_view{"**"}); it != node.children.end())
+            if (!it->second.ids.empty()) return true;
+
+        if (pos > topic.size())
+            return !node.ids.empty();
+
+        auto [seg, sep] = next_segment(topic, pos);
+        std::size_t next_pos = (sep == std::string_view::npos) ? topic.size() + 1 : sep + 1;
+
+        if (auto it = node.children.find(seg); it != node.children.end())
+            if (has_match_walk(it->second, topic, next_pos)) return true;
+
+        if (auto it = node.children.find(std::string_view{"*"}); it != node.children.end())
+            if (has_match_walk(it->second, topic, next_pos)) return true;
+
+        return false;
     }
 };
 

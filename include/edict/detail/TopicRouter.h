@@ -77,12 +77,10 @@ public:
     }
 
     [[nodiscard]] bool has_subscribers(std::string_view topic) const {
-        // Short-circuit: stop as soon as any match is found
         if (auto it = exact_.find(topic); it != exact_.end() && !it->second.empty())
             return true;
-        bool found = false;
-        tree_.match(topic, [&](Id) { found = true; });
-        if (found) return true;
+        if (tree_.has_any_match(topic))
+            return true;
         for (const auto& [pred, id] : predicates_)
             if (pred(topic)) return true;
         return false;

@@ -100,10 +100,17 @@ public:
         return state_->store.contains(key);
     }
 
-    /// Remove a key. Does NOT fire observers (erase has no knowledge of the stored type).
+    /// Remove a key and fire zero-arg observers on that key.
+    /// Typed observers (taking old/new values) will NOT fire — erase has
+    /// no knowledge of the stored type. Zero-arg watchers will be notified.
     void erase(std::string_view key) {
-        typename Policy::UniqueLock lock(state_->mutex);
-        state_->store.erase(std::string(key));
+        auto key_str = std::string(key);
+        {
+            typename Policy::UniqueLock lock(state_->mutex);
+            state_->store.erase(key_str);
+        }
+        // Fire zero-arg observers only (no typed args to publish)
+        state_->broadcaster.publish(key_str);
     }
 
     /// Set callback for observer exceptions (propagated to internal broadcaster).
