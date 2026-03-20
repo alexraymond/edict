@@ -49,7 +49,11 @@ public:
             if (it != state_->store.end()) {
                 try {
                     old_val = std::any_cast<V>(it->second);
-                } catch (const std::bad_any_cast&) {}
+                } catch (const std::bad_any_cast&) {
+                    // Type changed: old value treated as absent (nullopt).
+                    // Existing observers of the old type will receive bad_any_cast
+                    // during dispatch, routed to the error handler if set.
+                }
                 it->second = new_copy;
             } else {
                 state_->store.emplace(key_str, new_copy);

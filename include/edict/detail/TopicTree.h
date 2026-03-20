@@ -67,13 +67,11 @@ public:
         if (found) std::erase(node->ids, id);
     }
 
+    /// Zero-allocation matching. Walks the topic string segment by segment,
+    /// recursing directly into the trie without pre-splitting into a vector.
     template <typename F>
     void match(std::string_view topic, F&& on_match) const {
-        std::vector<std::string_view> segments;
-        for_each_segment(topic, [&segments](std::string_view seg) {
-            segments.push_back(seg);
-        });
-        match_impl(root_, segments, 0, on_match);
+        match_walk(root_, topic, 0, on_match);
     }
 
 private:
@@ -84,38 +82,66 @@ private:
 
     Node root_;
 
+    // Extract the next segment starting at `pos`. Returns {segment, next_pos}.
+    // next_pos == npos means this was the last segment.
+    static std::pair<std::string_view, std::size_t> next_segment(
+            std::string_view topic, std::size_t pos) {
+        auto sep = topic.find('/', pos);
+        auto len = (sep == std::string_view::npos) ? std::string_view::npos : sep - pos;
+        return {topic.substr(pos, len), sep};
+    }
+
     static void for_each_segment(std::string_view s, auto&& fn) {
         std::size_t pos = 0;
         while (pos <= s.size()) {
-            auto sep = s.find('/', pos);
-            auto len = (sep == std::string_view::npos) ? std::string_view::npos : sep - pos;
-            fn(s.substr(pos, len));
+            auto [seg, sep] = next_segment(s, pos);
+            fn(seg);
             if (sep == std::string_view::npos) break;
             pos = sep + 1;
         }
     }
 
     template <typename F>
-    void match_impl(const Node& node, const std::vector<std::string_view>& segments,
-                    std::size_t depth, F&& on_match) const {
+    void match_walk(const Node& node, std::string_view topic,
+                    std::size_t pos, F&& on_match) const {
         // ** matches zero or more remaining segments (terminal only)
         if (auto it = node.children.find(std::string_view{"**"}); it != node.children.end())
             for (auto id : it->second.ids)
                 on_match(id);
 
-        if (depth == segments.size()) {
+        if (pos > topic.size()) {
+            // Past end — collect leaf IDs
             for (auto id : node.ids)
                 on_match(id);
             return;
         }
 
-        // Exact segment match — transparent lookup, no std::string allocation
-        if (auto it = node.children.find(segments[depth]); it != node.children.end())
-            match_impl(it->second, segments, depth + 1, on_match);
+        if (pos == topic.size() && topic.empty()) {
+            // Edge case: empty topic (shouldn't happen with validation, but safe)
+            for (auto id : node.ids)
+                on_match(id);
+            return;
+        }
+
+        // Check if we've consumed the entire topic
+        if (pos > topic.size()) return;
+
+        auto [seg, sep] = next_segment(topic, pos);
+        std::size_t next_pos = (sep == std::string_view::npos) ? topic.size() + 1 : sep + 1;
+
+        // Exact segment match
+        if (auto it = node.children.find(seg); it != node.children.end())
+            match_walk(it->second, topic, next_pos, on_match);
 
         // * matches any single segment
         if (auto it = node.children.find(std::string_view{"*"}); it != node.children.end())
-            match_impl(it->second, segments, depth + 1, on_match);
+            match_walk(it->second, topic, next_pos, on_match);
+
+        // If this is the last segment (sep == npos), also check leaf
+        if (sep == std::string_view::npos) {
+            // We're at the final segment — check for exact node match at this depth
+            // (already handled by the exact match above recursing to next_pos > topic.size())
+        }
     }
 };
 

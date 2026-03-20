@@ -66,9 +66,15 @@ public:
     }
 
     [[nodiscard]] bool has_subscribers(std::string_view topic) const {
+        // Short-circuit: stop as soon as any match is found
+        if (auto it = exact_.find(topic); it != exact_.end() && !it->second.empty())
+            return true;
         bool found = false;
-        match(topic, [&](Id) { found = true; });
-        return found;
+        tree_.match(topic, [&](Id) { found = true; });
+        if (found) return true;
+        for (const auto& [pred, id] : predicates_)
+            if (pred(topic)) return true;
+        return false;
     }
 
     [[nodiscard]] std::size_t subscriber_count(std::string_view topic) const {
