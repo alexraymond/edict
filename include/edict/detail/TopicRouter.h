@@ -61,20 +61,19 @@ public:
         tree_.match(topic, on_match);
     }
 
-    /// Match user predicates only. May invoke arbitrary user code — do NOT
-    /// call while holding a lock that user code might try to acquire.
-    template <typename F>
-    void match_predicates(std::string_view topic, F&& on_match) const {
-        for (const auto& [pred, id] : predicates_)
-            if (pred(topic))
-                on_match(id);
+    /// Snapshot the predicates vector (for lock-safe iteration outside the lock).
+    [[nodiscard]] auto predicates_snapshot() const {
+        return predicates_;
     }
 
-    /// Full match (exact + wildcards + predicates). Only safe when no lock is held.
+    /// Full match (exact + wildcards + predicates). Only safe when no lock is held
+    /// AND predicates_ is not being concurrently mutated.
     template <typename F>
     void match(std::string_view topic, F&& on_match) const {
         match_static(topic, on_match);
-        match_predicates(topic, on_match);
+        for (const auto& [pred, id] : predicates_)
+            if (pred(topic))
+                on_match(id);
     }
 
     [[nodiscard]] bool has_subscribers(std::string_view topic) const {

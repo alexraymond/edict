@@ -199,25 +199,29 @@ public:
 
     [[nodiscard]] std::size_t subscriber_count(std::string_view topic) const {
         std::size_t n = 0;
+        decltype(state_->router.predicates_snapshot()) preds;
         {
             typename Policy::SharedLock lock(state_->mutex);
             state_->router.match_static(topic, [&](detail::TopicRouter::Id) { ++n; });
+            preds = state_->router.predicates_snapshot();
         }
-        // Predicates evaluated outside lock (may re-enter)
-        state_->router.match_predicates(topic, [&](detail::TopicRouter::Id) { ++n; });
+        for (const auto& [pred, id] : preds)
+            if (pred(topic)) ++n;
         return n;
     }
 
     [[nodiscard]] bool has_subscribers(std::string_view topic) const {
+        decltype(state_->router.predicates_snapshot()) preds;
         {
             typename Policy::SharedLock lock(state_->mutex);
             bool found = false;
             state_->router.match_static(topic, [&](detail::TopicRouter::Id) { found = true; });
             if (found) return true;
+            preds = state_->router.predicates_snapshot();
         }
-        bool found = false;
-        state_->router.match_predicates(topic, [&](detail::TopicRouter::Id) { found = true; });
-        return found;
+        for (const auto& [pred, id] : preds)
+            if (pred(topic)) return true;
+        return false;
     }
 
     [[nodiscard]] std::vector<std::string> active_topics() const {
@@ -267,6 +271,7 @@ private:
     // if a predicate calls back into the Broadcaster.
     Snapshot collect_snapshot(std::string_view topic) {
         Snapshot snap;
+        decltype(state_->router.predicates_snapshot()) preds;
         {
             typename Policy::SharedLock lock(state_->mutex);
             state_->router.match_static(topic, [&](detail::TopicRouter::Id id) {
@@ -274,13 +279,16 @@ private:
                     snap.entries.push_back(it->second);
             });
             snap.error_handler = state_->error_handler;
+            preds = state_->router.predicates_snapshot();
         }
-        // Predicate evaluation outside the lock — safe for reentrant predicates
-        state_->router.match_predicates(topic, [&](detail::TopicRouter::Id id) {
-            typename Policy::SharedLock lock(state_->mutex);
-            if (auto it = state_->entries.find(id); it != state_->entries.end())
-                snap.entries.push_back(it->second);
-        });
+        // Predicate evaluation on snapshot — safe from data race AND reentrant predicates
+        for (const auto& [pred, id] : preds) {
+            if (pred(topic)) {
+                typename Policy::SharedLock lock(state_->mutex);
+                if (auto it = state_->entries.find(id); it != state_->entries.end())
+                    snap.entries.push_back(it->second);
+            }
+        }
         // O(N log N) where N is matching subscribers. For hot paths with many
         // subscribers on the same topic, use Channel<Args...> which maintains
         // sorted order at insert time.
